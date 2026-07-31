@@ -97,30 +97,70 @@ so once `osk` and `C` are fixed, the nullifier is determined. That is exactly
 the paper's point (§4.3): "one coin can only ever yield one `nf`". -/
 axiom nullHash : OwnerSecret → F → F
 
-/-! ## Anchor context binding (the anti-grief fix)
+/-! ## Anchor context binding (the anti-grief fix, corrected)
 
 Anchor records are copyable bytes: a mempool spy can copy a record into their
 own transaction and try to win the first-occurrence race, freezing the
-victim's coins. The fix: every record carries a publicly verifiable binding
-`B = H(nf, ctx)`, where `ctx` is derived from the *carrying* transaction's
-input side — un-reproducible by a copier — and only well-formed occurrences
-(`B = H(nf, ctx)`) count toward first occurrence. -/
+victim's coins. A *publicly self-consistent* binding `B = H(nf, ctx)` does not
+help — `nf` and `ctx` are both on-chain, so anyone can recompute it. The
+corrected design: the on-chain payload **is** the bound value
+`P = H(raw_nf, ctx)`; the raw nullifier never appears on-chain (only in
+consignments and proofs). Well-formedness is relative to a `raw_nf` supplied
+by the verifier, so occurrences of a coin are recognizable only to those who
+know its raw nullifier — consignment holders. That scoping is intended. -/
 
 /-- Anchoring context `ctx`: derived from the carrying Bitcoin transaction's
 input side. Modeled abstractly as a field element; the *un-reproducibility*
-property (a copier's transaction derives a different `ctx`) appears as an
-explicit hypothesis (`ctx' ≠ ctx`) in the anti-grief theorems. -/
+property (a copier's transaction derives a different `ctx` — in fact a context
+fresh w.r.t. the whole log, since each transaction spends its own inputs)
+appears as an explicit hypothesis in the anti-grief theorems. -/
 abbrev AnchorCtx := F
 
-/-- Context-binding hash `B = H(nf, ctx)` — opaque. -/
+/-- Context-binding hash `P = H(raw_nf, ctx)` — opaque. -/
 axiom bindHash : F → AnchorCtx → F
 
+/-- An **anchor entry** in the on-chain log: the payload `P` (the bound value
+`H(raw_nf, ctx)`) and the carrying transaction's context `ctx`. The raw
+nullifier is *not* part of the entry. -/
+structure AnchorEntry where
+  /-- The on-chain payload, claimed to be `H(raw_nf, ctx)` for the spent
+  coin's raw nullifier. -/
+  P : F
+  /-- The carrying transaction's context. -/
+  ctx : AnchorCtx
+
+/-- **Well-formedness of an occurrence, relative to a raw nullifier** supplied
+by the verifier (from the consignment/proof): the payload must be the binding
+of that raw nullifier under the entry's context. Only well-formed entries
+count as occurrences in the first-occurrence rule. -/
+def AnchorEntry.wellFormed (e : AnchorEntry) (raw_nf : F) : Prop :=
+  e.P = bindHash raw_nf e.ctx
+
 /-- **Cryptographic assumption (collision resistance of `H` at the anchor
-context binding).** For a fixed nullifier, the binding is injective in the
-context: `H(nf, ctx) = H(nf, ctx') → ctx = ctx'`. Contrapositively, a record
-copied under a different context cannot carry a valid binding — the
-injectivity the anti-grief theorems need. -/
-axiom bindHash_ctx_injective : ∀ nf, Injective (bindHash nf)
+binding).** The binding is injective in both arguments: two different
+`(raw_nf, ctx)` pairs never share a payload. This is what makes an occurrence
+commit to exactly one coin under exactly one carrying context
+(`payload_binds_one_nullifier`, `copied_record_not_wellformed`). -/
+axiom bindHash_injective :
+  ∀ nf₁ ctx₁ nf₂ ctx₂, bindHash nf₁ ctx₁ = bindHash nf₂ ctx₂ → nf₁ = nf₂ ∧ ctx₁ = ctx₂
+
+/-- Abstract adversarial knowledge of a raw nullifier, given the public chain
+log. Consignment holders know their coins' raw nullifiers *off-chain*; this
+predicate is about what an adversary can derive/compute. Left abstract —
+constrained by the preimage-resistance assumption below. -/
+axiom KnowsRawNf : List AnchorEntry → F → Prop
+
+/-- **Cryptographic assumption (preimage resistance of `H` at the anchor
+binding).** Producing a *fresh* well-formed occurrence of `raw_nf` — one whose
+context is not already on-chain, i.e. genuinely computed by the adversary
+rather than replayed — requires knowing `raw_nf`. Equivalently: from the
+payload `P = H(raw_nf, ctx)` alone, an adversary cannot derive `raw_nf` well
+enough to bind it under a new context. (Honestly produced anchors are exempt:
+their context is already in the log, so the freshness side condition fails —
+the honest sender learned `raw_nf` from the coin's consignment anyway.) -/
+axiom occurrence_requires_knowledge :
+  ∀ (log : List AnchorEntry) (e : AnchorEntry) (raw_nf : F),
+    e.wellFormed raw_nf → (∀ e' ∈ log, e'.ctx ≠ e.ctx) → KnowsRawNf log raw_nf
 
 /-! ## Issuer signatures (paper §4.1: `Σ`, §4.4 item 1) -/
 

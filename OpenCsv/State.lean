@@ -45,24 +45,6 @@ published nullifier is the coin's nullifier (§4.5 items 1 and 3):
 def Spend.wellFormed (sp : Spend) : Prop :=
   ownerKey sp.osk = sp.coin.owner ∧ sp.nf = nullHash sp.osk (commitHash sp.coin)
 
-/-- An **anchor entry** in the on-chain log (the anti-grief fix): the
-published record `(nf, B)` together with `ctx`, the context of the carrying
-transaction (derived from its input side — see `Interfaces.lean`). -/
-structure AnchorEntry where
-  /-- The nullifier being published. -/
-  nf : F
-  /-- The context binding `B`, claimed to equal `H(nf, ctx)`. -/
-  B : F
-  /-- The carrying transaction's context. -/
-  ctx : AnchorCtx
-
-/-- **Well-formedness of an occurrence** (the anti-grief rule): the binding
-must match the carrying transaction's context, `B = H(nf, ctx)`. Only
-well-formed entries count as occurrences in the first-occurrence rule; a
-copied record under a copier's (different) context fails this check — see
-`copied_record_not_wellformed` in `Theorems.lean`. -/
-def AnchorEntry.wellFormed (e : AnchorEntry) : Prop := e.B = bindHash e.nf e.ctx
-
 /-- A protocol step: one transaction (§4.4–4.6). Transfers and redemptions
 carry the anchoring context `ctx` of their carrying transaction. -/
 inductive Step where
@@ -92,23 +74,27 @@ def Step.spends : Step → List Spend
 def Step.consumed (s : Step) : List Coin := s.spends.map Spend.coin
 
 /-- Anchor entries a step publishes on-chain (§4.7). Mints publish none.
-Honest steps bind each nullifier to the carrying transaction's context:
-`B = H(nf, ctx)` — so honestly produced anchors are well-formed by
-construction (`Step.anchors_wellformed`).
-(The prototype's hash-compressed multi-input anchor `H(nf_1 ∥ … ∥ nf_m)` is
-abstracted away here: the log records the individual keys.)
+Honest steps bind each raw nullifier to the carrying transaction's context:
+the payload is `P = H(raw_nf, ctx)` and the raw nullifier itself never
+touches the chain — so honestly produced anchors are well-formed (for their
+spends' raw nullifiers) by construction (`Step.anchors_wellformed`).
+(The prototype's hash-compressed multi-input anchor is abstracted away here:
+the log records the individual payloads.)
 (`noncomputable` because `bindHash` is an opaque hash.) -/
 noncomputable def Step.anchors : Step → List AnchorEntry
-  | Step.transfer sps _ ctx => sps.map (fun sp => ⟨sp.nf, bindHash sp.nf ctx, ctx⟩)
-  | Step.redeem sp _ ctx => [⟨sp.nf, bindHash sp.nf ctx, ctx⟩]
+  | Step.transfer sps _ ctx => sps.map (fun sp => ⟨bindHash sp.nf ctx, ctx⟩)
+  | Step.redeem sp _ ctx => [⟨bindHash sp.nf ctx, ctx⟩]
   | Step.mint _ _ _ _ _ => []
 
-/-- The nullifier keys a step publishes (the `nf` components of its anchors). -/
-noncomputable def Step.anchorNfs (s : Step) : List F := s.anchors.map AnchorEntry.nf
+/-- The raw nullifiers a step's spends emit — off-chain knowledge, available
+to consignment holders and verifiers, never appearing on-chain. -/
+def Step.rawNfs (s : Step) : List F := s.spends.map Spend.nf
 
-/-- Honestly produced anchors are well-formed by construction: an honest
-transaction binds each nullifier to its own carrying context, `B = H(nf, ctx)`. -/
-theorem Step.anchors_wellformed (s : Step) : ∀ e ∈ s.anchors, e.wellFormed := by
+/-- Honestly produced anchors are well-formed by construction: each published
+entry is the binding of its spend's raw nullifier under the carrying
+context. -/
+theorem Step.anchors_wellformed (s : Step) :
+    ∀ e ∈ s.anchors, ∃ sp ∈ s.spends, e.wellFormed sp.nf := by
   cases s with
   | mint _ _ _ _ _ =>
     intro e he
@@ -116,13 +102,13 @@ theorem Step.anchors_wellformed (s : Step) : ∀ e ∈ s.anchors, e.wellFormed :
   | transfer sps outs ctx =>
     intro e he
     simp only [Step.anchors, List.mem_map] at he
-    obtain ⟨sp, _, rfl⟩ := he
-    exact rfl
+    obtain ⟨sp, hmem, rfl⟩ := he
+    exact ⟨sp, hmem, rfl⟩
   | redeem sp V ctx =>
     intro e he
     simp only [Step.anchors, List.mem_singleton] at he
     subst he
-    exact rfl
+    exact ⟨sp, List.mem_singleton_self sp, rfl⟩
 
 /-- Public value minted by a step, per asset (§4.9: the `+` terms).
 (`noncomputable` because `assetId` is an opaque hash.) -/
@@ -222,7 +208,7 @@ verified anchor log before this transaction, the transaction itself, and the
 recipient's claimed outputs (the "coin openings" of §4.8). -/
 structure Claim where
   /-- Anchor log before this transaction (the receiver's chain view): an
-  ordered list of anchor entries `(nf, B, ctx)`. -/
+  ordered list of anchor entries `(P, ctx)`. -/
   priorLog : List AnchorEntry
   /-- The transaction being received. -/
   step : Step

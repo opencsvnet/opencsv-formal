@@ -71,20 +71,23 @@ OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
   per the roadmap.
 
 ### T3 — Nullifier uniqueness (`nullifier_unique`, `first_occurrence_unique`,
-`later_occurrence_rejected`, `double_spend_conflict`, `double_spend_observable`)
-and the anti-grief fix (`copied_record_not_wellformed`, `griefer_copy_invisible`)
+`later_occurrence_rejected`, `payload_binds_one_nullifier`,
+`double_spend_conflict`, `double_spend_observable`) and the anti-grief fix
+(`copied_record_not_wellformed`, `griefer_copy_invisible`,
+`no_occurrence_without_knowledge`, `unknowing_adversary_entry_invisible`)
 
-- **Statement.** Two well-formed spends of the same coin emit equal nullifiers
-  (ownership `owner = H(osk)` + collision resistance of the owner-key
-  derivation force the same `osk`; the nullifier is then determined, since
-  `H("null" ∥ osk ∥ C)` is a function). The anchor log is an ordered list of
-  **anchor entries `(nf, B, ctx)`** with a first-occurrence rule
-  (`IsFirstOccurrence`) that counts only *well-formed* entries
-  (`B = H(nf, ctx)`); two positions that both pass the first-occurrence check
-  for the same nullifier are equal, and any other well-formed occurrence is
-  necessarily later and rejected. Hence two recipients cannot both finally
-  accept spends of one coin, and any attempt is an observable conflict (equal
-  nullifiers at distinct well-formed anchor positions).
+- **Statement.** Two well-formed spends of the same coin emit equal raw
+  nullifiers (ownership `owner = H(osk)` + collision resistance of the
+  owner-key derivation force the same `osk`; the nullifier is then determined,
+  since `H("null" ∥ osk ∥ C)` is a function). The anchor log is an ordered
+  list of **anchor entries `(P, ctx)`** where the on-chain payload is
+  `P = H(raw_nf, ctx)` — the raw nullifier never appears on-chain.
+  Occurrences are *relative to a verifier-supplied raw nullifier*:
+  `wellFormed(e, raw_nf) ⟺ e.P = H(raw_nf, e.ctx)`. The first-occurrence rule
+  (`IsFirstOccurrence`) counts only well-formed entries; two positions that
+  both pass the check for the same raw nullifier are equal, and any other
+  well-formed occurrence is necessarily later and rejected. Hence two
+  recipients cannot both finally accept spends of one coin.
 - **Paper.** §5.2 and §4.7 rules 1–3.
 - **Rust.** `crates/opencsv-core/src/coin.rs` (`Coin::nullifier`),
   `crates/opencsv-core/src/anchor.rs` (`AnchorRecord::nullifier_keys`), and the
@@ -92,36 +95,49 @@ and the anti-grief fix (`copied_record_not_wellformed`, `griefer_copy_invisible`
   (`first_nullifier_occurrence`, `RejectReason::NullifierConflict`).
 - **Proof.** `nullifier_unique` is the only step using a hardness assumption
   (`ownerKey_injective` — collision resistance of `owner = H(osk)`); the
-  first-occurrence lemmas are pure list reasoning over the entry model.
-- **Scope note.** The 0-conf hazard (a conflicting anchor confirmed *first*)
-  is Bitcoin's own finality assumption (§4.7 rule 2), not protocol logic; the
+  first-occurrence lemmas are pure list reasoning over the entry model;
+  `payload_binds_one_nullifier` (one payload is an occurrence of at most one
+  coin) uses `bindHash_injective`.
+- **Scope note (observability).** Under the corrected anchor model the raw
+  nullifier stays off-chain, so a double-spend conflict is observable **by
+  consignment holders** — the parties who know `raw_nf` and whose acceptance
+  is at stake — not by arbitrary chain observers. This scoping is intended.
+  Separately, the 0-conf hazard (a conflicting anchor confirmed *first*) is
+  Bitcoin's own finality assumption (§4.7 rule 2), not protocol logic; the
   `k ≤ confs` conjunct of `Accept` records where it enters.
 
-#### The griefing fix (context-bound occurrences)
+#### The griefing fix (bound-payload occurrences, corrected)
 
 Anchor records are copyable bytes: a mempool spy could copy a record into
 their own transaction and try to win the first-occurrence race, freezing the
-victim's coins. The spec fix binds each record to its carrying transaction:
-records carry `B = H(nf, ctx)` where `ctx` is derived from the carrying
-transaction's input side (un-reproducible by a copier), and only well-formed
-occurrences count. In the model:
+victim's coins. A first attempt — a publicly self-consistent binding
+`B = H(nf, ctx)` in the record — does **not** fix this: `nf` and `ctx` are
+both on-chain, so anyone can recompute the binding. The corrected design
+makes the payload itself the bound value `P = H(raw_nf, ctx)` and keeps the
+raw nullifier off-chain (consignments/proofs only). In the model:
 
-- `AnchorEntry` = `(nf, B, ctx)` with `AnchorEntry.wellFormed : B = bindHash
-  nf ctx`; `OccurrenceAt` / `IsFirstOccurrence` quantify over well-formed
-  entries only; honest steps produce well-formed anchors by construction
-  (`Step.anchors_wellformed`).
-- `copied_record_not_wellformed`: from the new injectivity hypothesis
-  `bindHash_ctx_injective`, a record copied under any `ctx' ≠ ctx` satisfies
-  `B ≠ H(nf, ctx')` — it is not well-formed.
-- `griefer_copy_invisible`: such a copy, at any position of the log, is not a
-  first occurrence (not an occurrence at all) — a griefer cannot create a
-  well-formed occurrence that races the legitimate anchor.
+- `AnchorEntry` = `(P, ctx)`; `AnchorEntry.wellFormed e raw_nf : e.P =
+  bindHash raw_nf e.ctx` is relative to the verifier's `raw_nf`;
+  `OccurrenceAt` / `IsFirstOccurrence` quantify over well-formed entries
+  only; honest steps publish `⟨bindHash sp.nf ctx, ctx⟩` and are well-formed
+  by construction (`Step.anchors_wellformed`).
+- **Replay** fails by injectivity: `copied_record_not_wellformed` (from
+  `bindHash_injective`, a copied payload under `ctx' ≠ ctx` satisfies
+  `P ≠ H(raw_nf, ctx')`) and `griefer_copy_invisible` (the copy is no
+  occurrence at all, at any position).
+- **Recomputation** fails by preimage resistance:
+  `no_occurrence_without_knowledge` — an adversary who does not know
+  `raw_nf` cannot produce any fresh-context entry well-formed for it (via
+  the `occurrence_requires_knowledge` axiom) — and its positioned form
+  `unknowing_adversary_entry_invisible`.
 - The copier's inability to reproduce `ctx` is a *deployment* hypothesis of
-  the fix (ctx derivation from the copier-uncontrolled input side); it appears
-  as the explicit hypothesis `ctx' ≠ ctx`, not as a new axiom. The only new
-  axiom is `bindHash_ctx_injective` (collision resistance of the binding
-  hash). The axiom audit confirms the anti-grief theorems depend on exactly
-  `[bindHash, bindHash_ctx_injective]` (plus `propext`).
+  the fix (ctx is derived from the carrying transaction's own inputs, fresh
+  w.r.t. the log); it appears as explicit hypotheses (`ctx' ≠ ctx`,
+  freshness) in the theorems, not as an axiom. The new axioms are
+  `bindHash_injective` (collision resistance) and
+  `occurrence_requires_knowledge` (preimage resistance), replacing the
+  earlier `bindHash_ctx_injective`. The axiom audit confirms each theorem's
+  exact dependencies.
 
 ### T4 — Receiver correctness (`Accept`, `receiver_correctness`,
 `accept_nullifier_no_earlier_occurrence`, `accepted_trace_supply`)
@@ -152,7 +168,8 @@ All in `OpenCsv/Interfaces.lean`:
 | `assetId_injective` | collision resistance of the genesis hash | asset binding (stated; the state machine threads `asset_id` directly) |
 | `commitHash_injective` | binding of coin commitments | stated for completeness (T3 identifies coins with their openings) |
 | `ownerKey_injective` | collision resistance of `owner = H(osk)` | **T3** (`nullifier_unique`) |
-| `bindHash_ctx_injective` | collision resistance of the anchor binding `B = H(nf, ctx)` in `ctx` | **anti-grief** (`copied_record_not_wellformed`, `griefer_copy_invisible`) |
+| `bindHash_injective` | collision resistance of the anchor binding `P = H(raw_nf, ctx)` in both arguments | **anti-grief / conflict soundness** (`payload_binds_one_nullifier`, `copied_record_not_wellformed`, `griefer_copy_invisible`) |
+| `occurrence_requires_knowledge` | preimage resistance of the anchor binding: a fresh well-formed occurrence of `raw_nf` requires knowing `raw_nf` | **anti-grief** (`no_occurrence_without_knowledge`, `unknowing_adversary_entry_invisible`) |
 | `sig_unforgeable` | EUF-CMA of the issuer scheme, abstractly | **T1** (`mints_authorized`) |
 | `ProofSystem.sound` | soundness of `Π`, as a structure field | **T4** (`receiver_correctness`) |
 
