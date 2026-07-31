@@ -1,5 +1,11 @@
 # OpenCSV — Lean 4 formalization (paper §6)
 
+Part of [github.com/opencsvnet](https://github.com/opencsvnet): the
+scheme paper and explainer site live in
+[opencsv](https://github.com/opencsvnet/opencsv), the Rust reference
+implementation in [opencsv-rs](https://github.com/opencsvnet/opencsv-rs).
+Paths of the form `crates/…` below refer to the `opencsv-rs` repo.
+
 Mechanization of the OpenCSV **protocol logic** — the coin state machine
 (genesis → mint → transfer* → redeem), the value-conservation invariant, and
 nullifier uniqueness — per the formal verification roadmap of paper §6.
