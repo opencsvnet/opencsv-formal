@@ -97,6 +97,31 @@ so once `osk` and `C` are fixed, the nullifier is determined. That is exactly
 the paper's point (§4.3): "one coin can only ever yield one `nf`". -/
 axiom nullHash : OwnerSecret → F → F
 
+/-! ## Anchor context binding (the anti-grief fix)
+
+Anchor records are copyable bytes: a mempool spy can copy a record into their
+own transaction and try to win the first-occurrence race, freezing the
+victim's coins. The fix: every record carries a publicly verifiable binding
+`B = H(nf, ctx)`, where `ctx` is derived from the *carrying* transaction's
+input side — un-reproducible by a copier — and only well-formed occurrences
+(`B = H(nf, ctx)`) count toward first occurrence. -/
+
+/-- Anchoring context `ctx`: derived from the carrying Bitcoin transaction's
+input side. Modeled abstractly as a field element; the *un-reproducibility*
+property (a copier's transaction derives a different `ctx`) appears as an
+explicit hypothesis (`ctx' ≠ ctx`) in the anti-grief theorems. -/
+abbrev AnchorCtx := F
+
+/-- Context-binding hash `B = H(nf, ctx)` — opaque. -/
+axiom bindHash : F → AnchorCtx → F
+
+/-- **Cryptographic assumption (collision resistance of `H` at the anchor
+context binding).** For a fixed nullifier, the binding is injective in the
+context: `H(nf, ctx) = H(nf, ctx') → ctx = ctx'`. Contrapositively, a record
+copied under a different context cannot carry a valid binding — the
+injectivity the anti-grief theorems need. -/
+axiom bindHash_ctx_injective : ∀ nf, Injective (bindHash nf)
+
 /-! ## Issuer signatures (paper §4.1: `Σ`, §4.4 item 1) -/
 
 /-- The mint message signed by the issuer: `(asset_id, V, mint_nonce)`. -/

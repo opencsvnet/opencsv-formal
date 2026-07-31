@@ -45,38 +45,84 @@ published nullifier is the coin's nullifier (§4.5 items 1 and 3):
 def Spend.wellFormed (sp : Spend) : Prop :=
   ownerKey sp.osk = sp.coin.owner ∧ sp.nf = nullHash sp.osk (commitHash sp.coin)
 
-/-- A protocol step: one transaction (§4.4–4.6). -/
+/-- An **anchor entry** in the on-chain log (the anti-grief fix): the
+published record `(nf, B)` together with `ctx`, the context of the carrying
+transaction (derived from its input side — see `Interfaces.lean`). -/
+structure AnchorEntry where
+  /-- The nullifier being published. -/
+  nf : F
+  /-- The context binding `B`, claimed to equal `H(nf, ctx)`. -/
+  B : F
+  /-- The carrying transaction's context. -/
+  ctx : AnchorCtx
+
+/-- **Well-formedness of an occurrence** (the anti-grief rule): the binding
+must match the carrying transaction's context, `B = H(nf, ctx)`. Only
+well-formed entries count as occurrences in the first-occurrence rule; a
+copied record under a copier's (different) context fails this check — see
+`copied_record_not_wellformed` in `Theorems.lean`. -/
+def AnchorEntry.wellFormed (e : AnchorEntry) : Prop := e.B = bindHash e.nf e.ctx
+
+/-- A protocol step: one transaction (§4.4–4.6). Transfers and redemptions
+carry the anchoring context `ctx` of their carrying transaction. -/
 inductive Step where
   /-- Mint (§4.4): creates `outputs` totaling public `V` under issuer
   signature `σ` on `(asset_id, V, nonce)`. -/
   | mint (asset : Asset) (V : Nat) (nonce : F) (σ : Sig) (outputs : List Coin)
-  /-- Shielded transfer (§4.5): consumes the `spends`, creates `outputs`. -/
-  | transfer (spends : List Spend) (outputs : List Coin)
-  /-- Redemption (§4.6): consumes one coin, burning public value `V`. -/
-  | redeem (spend : Spend) (V : Nat)
+  /-- Shielded transfer (§4.5): consumes the `spends`, creates `outputs`,
+  anchored under context `ctx`. -/
+  | transfer (spends : List Spend) (outputs : List Coin) (ctx : AnchorCtx)
+  /-- Redemption (§4.6): consumes one coin, burning public value `V`,
+  anchored under context `ctx`. -/
+  | redeem (spend : Spend) (V : Nat) (ctx : AnchorCtx)
 
 /-- Coins created by a step (redemption creates none). -/
 def Step.outputs : Step → List Coin
   | Step.mint _ _ _ _ outs => outs
-  | Step.transfer _ outs => outs
-  | Step.redeem _ _ => []
+  | Step.transfer _ outs _ => outs
+  | Step.redeem _ _ _ => []
 
 /-- The spends of a step. -/
 def Step.spends : Step → List Spend
-  | Step.transfer sps _ => sps
-  | Step.redeem sp _ => [sp]
+  | Step.transfer sps _ _ => sps
+  | Step.redeem sp _ _ => [sp]
   | Step.mint _ _ _ _ _ => []
 
 /-- Coins consumed by a step. -/
 def Step.consumed (s : Step) : List Coin := s.spends.map Spend.coin
 
-/-- Nullifier keys a step publishes on-chain (§4.7). Mints publish none.
+/-- Anchor entries a step publishes on-chain (§4.7). Mints publish none.
+Honest steps bind each nullifier to the carrying transaction's context:
+`B = H(nf, ctx)` — so honestly produced anchors are well-formed by
+construction (`Step.anchors_wellformed`).
 (The prototype's hash-compressed multi-input anchor `H(nf_1 ∥ … ∥ nf_m)` is
-abstracted away here: the log records the individual keys.) -/
-def Step.anchors : Step → List F
-  | Step.transfer sps _ => sps.map Spend.nf
-  | Step.redeem sp _ => [sp.nf]
+abstracted away here: the log records the individual keys.)
+(`noncomputable` because `bindHash` is an opaque hash.) -/
+noncomputable def Step.anchors : Step → List AnchorEntry
+  | Step.transfer sps _ ctx => sps.map (fun sp => ⟨sp.nf, bindHash sp.nf ctx, ctx⟩)
+  | Step.redeem sp _ ctx => [⟨sp.nf, bindHash sp.nf ctx, ctx⟩]
   | Step.mint _ _ _ _ _ => []
+
+/-- The nullifier keys a step publishes (the `nf` components of its anchors). -/
+noncomputable def Step.anchorNfs (s : Step) : List F := s.anchors.map AnchorEntry.nf
+
+/-- Honestly produced anchors are well-formed by construction: an honest
+transaction binds each nullifier to its own carrying context, `B = H(nf, ctx)`. -/
+theorem Step.anchors_wellformed (s : Step) : ∀ e ∈ s.anchors, e.wellFormed := by
+  cases s with
+  | mint _ _ _ _ _ =>
+    intro e he
+    exact absurd he (List.not_mem_nil _)
+  | transfer sps outs ctx =>
+    intro e he
+    simp only [Step.anchors, List.mem_map] at he
+    obtain ⟨sp, _, rfl⟩ := he
+    exact rfl
+  | redeem sp V ctx =>
+    intro e he
+    simp only [Step.anchors, List.mem_singleton] at he
+    subst he
+    exact rfl
 
 /-- Public value minted by a step, per asset (§4.9: the `+` terms).
 (`noncomputable` because `assetId` is an opaque hash.) -/
@@ -88,7 +134,7 @@ noncomputable def Step.mintedAt : Step → F → Nat
 The public redeem record carries the coin's asset and `V = coin.value`
 (the latter is enforced by validity, below). -/
 def Step.redeemedAt : Step → F → Nat
-  | Step.redeem sp V, a => if sp.coin.asset = a then V else 0
+  | Step.redeem sp V _, a => if sp.coin.asset = a then V else 0
   | _, _ => 0
 
 /-! ## Value accounting -/
@@ -117,9 +163,9 @@ def consumed : List Step → List Coin
 the on-paper "unspent" predicate (§4.5 item 4, §4.7). -/
 def Live (t : List Step) (c : Coin) : Prop := c ∈ produced t ∧ c ∉ consumed t
 
-/-- The on-chain anchor log of a trace: the ordered list of published
-nullifier keys (§4.7 rule 1: order is block order, then in-block order). -/
-def anchorLog : List Step → List F
+/-- The on-chain anchor log of a trace: the ordered list of published anchor
+entries (§4.7 rule 1: order is block order, then in-block order). -/
+noncomputable def anchorLog : List Step → List AnchorEntry
   | [] => []
   | s :: t => s.anchors ++ anchorLog t
 
@@ -153,11 +199,11 @@ def StepValid (t : List Step) (s : Step) : Prop :=
       SigVerify asset.ipk ⟨assetId asset, V, nonce⟩ σ = true ∧
       V = totalValue outputs ∧
       ∀ c ∈ outputs, c.asset = assetId asset
-  | Step.transfer spends outputs =>
+  | Step.transfer spends outputs _ctx =>
       (∀ sp ∈ spends, sp.wellFormed) ∧
       (∀ sp ∈ spends, Live t sp.coin) ∧
       ∀ a : F, valueOf a outputs = valueOf a (spends.map Spend.coin)
-  | Step.redeem sp V =>
+  | Step.redeem sp V _ctx =>
       sp.wellFormed ∧ Live t sp.coin ∧ V = sp.coin.value
 
 /-- **Valid coin traces** (§6 item 2), built one step at a time:
@@ -175,8 +221,9 @@ inductive ValidTrace : List Step → Prop where
 verified anchor log before this transaction, the transaction itself, and the
 recipient's claimed outputs (the "coin openings" of §4.8). -/
 structure Claim where
-  /-- Anchor log before this transaction (the receiver's chain view). -/
-  priorLog : List F
+  /-- Anchor log before this transaction (the receiver's chain view): an
+  ordered list of anchor entries `(nf, B, ctx)`. -/
+  priorLog : List AnchorEntry
   /-- The transaction being received. -/
   step : Step
   /-- The recipient's claimed outputs. -/

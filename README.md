@@ -72,16 +72,19 @@ OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 
 ### T3 — Nullifier uniqueness (`nullifier_unique`, `first_occurrence_unique`,
 `later_occurrence_rejected`, `double_spend_conflict`, `double_spend_observable`)
+and the anti-grief fix (`copied_record_not_wellformed`, `griefer_copy_invisible`)
 
 - **Statement.** Two well-formed spends of the same coin emit equal nullifiers
   (ownership `owner = H(osk)` + collision resistance of the owner-key
   derivation force the same `osk`; the nullifier is then determined, since
-  `H("null" ∥ osk ∥ C)` is a function). The anchor log is an ordered list with
-  a first-occurrence rule (`IsFirstOccurrence`); two positions that both pass
-  the first-occurrence check for the same nullifier are equal, and any other
-  occurrence is necessarily later and rejected. Hence two recipients cannot
-  both finally accept spends of one coin, and any attempt is an observable
-  conflict (equal nullifiers at distinct anchor positions).
+  `H("null" ∥ osk ∥ C)` is a function). The anchor log is an ordered list of
+  **anchor entries `(nf, B, ctx)`** with a first-occurrence rule
+  (`IsFirstOccurrence`) that counts only *well-formed* entries
+  (`B = H(nf, ctx)`); two positions that both pass the first-occurrence check
+  for the same nullifier are equal, and any other well-formed occurrence is
+  necessarily later and rejected. Hence two recipients cannot both finally
+  accept spends of one coin, and any attempt is an observable conflict (equal
+  nullifiers at distinct well-formed anchor positions).
 - **Paper.** §5.2 and §4.7 rules 1–3.
 - **Rust.** `crates/opencsv-core/src/coin.rs` (`Coin::nullifier`),
   `crates/opencsv-core/src/anchor.rs` (`AnchorRecord::nullifier_keys`), and the
@@ -89,18 +92,44 @@ OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
   (`first_nullifier_occurrence`, `RejectReason::NullifierConflict`).
 - **Proof.** `nullifier_unique` is the only step using a hardness assumption
   (`ownerKey_injective` — collision resistance of `owner = H(osk)`); the
-  first-occurrence lemmas are pure list reasoning (`later_occurrence_rejected`
-  depends on no axioms at all, as the axiom audit confirms).
+  first-occurrence lemmas are pure list reasoning over the entry model.
 - **Scope note.** The 0-conf hazard (a conflicting anchor confirmed *first*)
   is Bitcoin's own finality assumption (§4.7 rule 2), not protocol logic; the
   `k ≤ confs` conjunct of `Accept` records where it enters.
+
+#### The griefing fix (context-bound occurrences)
+
+Anchor records are copyable bytes: a mempool spy could copy a record into
+their own transaction and try to win the first-occurrence race, freezing the
+victim's coins. The spec fix binds each record to its carrying transaction:
+records carry `B = H(nf, ctx)` where `ctx` is derived from the carrying
+transaction's input side (un-reproducible by a copier), and only well-formed
+occurrences count. In the model:
+
+- `AnchorEntry` = `(nf, B, ctx)` with `AnchorEntry.wellFormed : B = bindHash
+  nf ctx`; `OccurrenceAt` / `IsFirstOccurrence` quantify over well-formed
+  entries only; honest steps produce well-formed anchors by construction
+  (`Step.anchors_wellformed`).
+- `copied_record_not_wellformed`: from the new injectivity hypothesis
+  `bindHash_ctx_injective`, a record copied under any `ctx' ≠ ctx` satisfies
+  `B ≠ H(nf, ctx')` — it is not well-formed.
+- `griefer_copy_invisible`: such a copy, at any position of the log, is not a
+  first occurrence (not an occurrence at all) — a griefer cannot create a
+  well-formed occurrence that races the legitimate anchor.
+- The copier's inability to reproduce `ctx` is a *deployment* hypothesis of
+  the fix (ctx derivation from the copier-uncontrolled input side); it appears
+  as the explicit hypothesis `ctx' ≠ ctx`, not as a new axiom. The only new
+  axiom is `bindHash_ctx_injective` (collision resistance of the binding
+  hash). The axiom audit confirms the anti-grief theorems depend on exactly
+  `[bindHash, bindHash_ctx_injective]` (plus `propext`).
 
 ### T4 — Receiver correctness (`Accept`, `receiver_correctness`,
 `accept_nullifier_no_earlier_occurrence`, `accepted_trace_supply`)
 
 - **Statement.** `Accept` is the §4.8 check list as a Prop: proof verifies,
-  the transaction publishes nullifier keys with no earlier occurrence in the
-  receiver's verified chain prefix, the anchor has ≥ `k` confirmations, and a
+  the transaction publishes nullifier keys with no earlier *well-formed*
+  occurrence in the receiver's verified chain prefix (the anti-grief form of
+  the first-occurrence check), the anchor has ≥ `k` confirmations, and a
   recipient key derives the owner of at least one claimed output. If `Accept`
   holds, then — modulo proof-system soundness — the received transaction
   extends a trace in the `ValidTrace` inductive and produces the claimed
@@ -123,6 +152,7 @@ All in `OpenCsv/Interfaces.lean`:
 | `assetId_injective` | collision resistance of the genesis hash | asset binding (stated; the state machine threads `asset_id` directly) |
 | `commitHash_injective` | binding of coin commitments | stated for completeness (T3 identifies coins with their openings) |
 | `ownerKey_injective` | collision resistance of `owner = H(osk)` | **T3** (`nullifier_unique`) |
+| `bindHash_ctx_injective` | collision resistance of the anchor binding `B = H(nf, ctx)` in `ctx` | **anti-grief** (`copied_record_not_wellformed`, `griefer_copy_invisible`) |
 | `sig_unforgeable` | EUF-CMA of the issuer scheme, abstractly | **T1** (`mints_authorized`) |
 | `ProofSystem.sound` | soundness of `Π`, as a structure field | **T4** (`receiver_correctness`) |
 
@@ -147,6 +177,11 @@ not assumptions of the development.
   `crates/opencsv-core/src/anchor.rs`) — the model's anchor log records
   individual nullifier keys; the compressed variant is an encoding detail of
   the 64-byte budget.
+- **The concrete `ctx` derivation of the anti-grief fix** — how the anchoring
+  context is computed from the carrying transaction's input side (and why a
+  copier cannot reproduce it) is a construction detail; the formalization
+  assumes its output abstractly as the hypothesis `ctx' ≠ ctx` in the
+  anti-grief theorems.
 - **Liveness/finality** — reorgs, censorship, and consignment non-delivery
   (§5.4) are not state-machine properties; only the `k ≤ confs` policy check
   is recorded in `Accept`.
