@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 LINE_RE = re.compile(r"^'([^']+)' depends on axioms: \[(.*)\]$")
+LINE_NONE_RE = re.compile(r"^'([^']+)' does not depend on any axioms$")
 
 
 def git(repo, *args):
@@ -48,10 +49,15 @@ def parse_audit(text):
         if not line:
             continue
         m = LINE_RE.match(line)
-        if not m:
-            sys.exit(f"error: axiom-audit line {n} is malformed: {line!r}")
-        axioms = [a.strip() for a in m.group(2).split(",") if a.strip()]
-        theorems.append((m.group(1), axioms))
+        if m:
+            axioms = [a.strip() for a in m.group(2).split(",") if a.strip()]
+            theorems.append((m.group(1), axioms))
+            continue
+        m = LINE_NONE_RE.match(line)
+        if m:
+            theorems.append((m.group(1), []))
+            continue
+        sys.exit(f"error: axiom-audit line {n} is malformed: {line!r}")
     if not theorems:
         sys.exit("error: no theorems found in the audit file")
     return theorems
