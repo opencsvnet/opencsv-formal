@@ -17,7 +17,7 @@ LAKE="${LAKE:-$(command -v lake || echo "$HOME/.elan/bin/lake")}"
 AUDIT=$("$LAKE" build 2>&1 | sed -E 's/^info: [^ ]+ //' | grep -v 'ℹ\|Build completed' | awk '
   /^'\''/ { if (e != "") print e; e = $0; next }
   { e = e " " $0 }
-  END { if (e != "") print e }' | sed -E 's/ +/ /g; s/\], /],/g' | sort)
+  END { if (e != "") print e }' | sed -E 's/ +/ /g; s/\], /],/g' | LC_ALL=C sort)
 
 if [[ "${1:-}" == "--write" ]]; then
   printf '%s\n' "$AUDIT" > axiom-audit.txt
