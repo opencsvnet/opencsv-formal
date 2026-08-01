@@ -10,3 +10,8 @@
 'OpenCsv.receiver_correctness' depends on axioms: [propext, OpenCsv.Sig, OpenCsv.SigVerify, OpenCsv.assetId, OpenCsv.bindHash, OpenCsv.commitHash, OpenCsv.nullHash, OpenCsv.ownerKey]
 'OpenCsv.transfer_conservation' depends on axioms: [propext, OpenCsv.Sig, OpenCsv.SigVerify, OpenCsv.assetId, OpenCsv.commitHash, OpenCsv.nullHash, OpenCsv.ownerKey, Quot.sound]
 'OpenCsv.unknowing_adversary_entry_invisible' depends on axioms: [propext, OpenCsv.KnowsRawNf, OpenCsv.bindHash, OpenCsv.occurrence_requires_knowledge]
+'OpenCsv.Value.carry_complete_single' depends on axioms: [propext, Quot.sound]
+'OpenCsv.Value.carry_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+'OpenCsv.Value.difference_interval_within_half_field' does not depend on any axioms
+'OpenCsv.Value.no_wrap' depends on axioms: [propext, Quot.sound]
+'OpenCsv.Value.range_checked_represents_exactly' depends on axioms: [propext, Quot.sound]

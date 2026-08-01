@@ -28,10 +28,11 @@ every cryptographic hardness assumption is an explicitly labeled `axiom` in
 ## Layout
 
 ```
-OpenCsv.lean            # root: imports the three modules
+OpenCsv.lean            # root: imports the modules
 OpenCsv/Interfaces.lean # §6 item 1 — abstract crypto interfaces + ALL assumptions
 OpenCsv/State.lean      # §6 item 2 — coin state machine (valid traces)
 OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
+OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
 ```
 
 ## What the theorems say, and what they correspond to
@@ -158,6 +159,42 @@ raw nullifier off-chain (consignments/proofs only). In the model:
   `MockVerifier` in the prototype deliberately does *not* provide).
 - **Proof.** One application of the soundness field, then the `snoc`
   constructor of `ValidTrace`.
+
+### The u64 conservation gadget (`OpenCsv/Value.lean`: `encode_lt`,
+`encode_injective`, `encode_surjective`, `range_checked_represents_exactly`,
+`per_limb_difference_bound`, `difference_interval_within_half_field`,
+`no_wrap`, `carry_sound`, `carry_complete_single`)
+
+- **Statement.** Coin values are u64, decomposed in-circuit into three
+  little-endian limbs of 24/24/16 bits. (i) A range-checked triple (each limb
+  below its width) represents *exactly* the integers `[0, 2^64)`: bounded,
+  injective, surjective (`range_checked_represents_exactly`). (ii) The sum
+  constraint's carry chain — per limb `t_i = lhs[0][i] + lhs[1][i] + c_i −
+  rhs[0][i] − rhs[1][i]`, `t_i = 2^24·c_{i+1}` in the field, boolean carries,
+  final carry zero, uniform radix `2^24` — is sound: if it holds, the integer
+  sums are equal (`carry_sound`). (iii) The key lemma: per-limb differences
+  lie in `(-2^26, 2^26) ⊂ (-p/2, p/2)` for the BabyBear prime
+  `p = 2^31 − 2^27 + 1` (`difference_interval_within_half_field`), so field
+  equality of the carry equations is integer equality — wrap-around cannot
+  fake balance (`no_wrap`). (iv) The honest direction holds for the mint
+  usage `[out0, out1] = [V, 0]` (`carry_complete_single`); the general
+  two-addends-both-sides converse is false (the module documents the
+  counterexample `(0,1,0) + 0 = (2^24−1,0,0) + (1,0,0)`, which needs carry
+  `−1`) — a completeness limitation only, since the prover chooses outputs.
+- **Paper.** §4.5 item 2 (conservation with range-checked values: "sums are
+  computed over opened witness values with per-value range checks, so
+  wrap-around cannot fake balance").
+- **Rust.** `crates/opencsv-pcd/src/value.rs` (`u64_to_felts`,
+  `range_check_value`, `enforce_sum_eq` — `carryConstraints` in the Lean
+  module is a one-to-one model of that function's equations), used by
+  `mint.rs` and `node.rs`. Field equality is modeled as congruence modulo
+  `p = 2013265921` over the integers; primality of `p` is never used (only
+  the size bound), so the module needs **no project axioms at all** — the
+  axiom audit shows only Lean core axioms (`propext`/`Quot.sound`/
+  `Classical.choice`, via `omega`).
+- **Proof.** All arithmetic is closed by `omega` over `Int`/`Nat` (including
+  div/mod by literal radices); the only manual steps are the no-wrap
+  divisibility argument and the carry telescope.
 
 ## Where the cryptographic hardness lives (complete list)
 
