@@ -33,6 +33,7 @@ OpenCsv/Interfaces.lean # §6 item 1 — abstract crypto interfaces + ALL assump
 OpenCsv/State.lean      # §6 item 2 — coin state machine (valid traces)
 OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
+OpenCsv/Scan.lean       # scan-first indexing model (paper §4.7.1)
 ```
 
 ## What the theorems say, and what they correspond to
@@ -195,6 +196,56 @@ raw nullifier off-chain (consignments/proofs only). In the model:
 - **Proof.** All arithmetic is closed by `omega` over `Int`/`Nat` (including
   div/mod by literal radices); the only manual steps are the no-wrap
   divisibility argument and the carry telescope.
+
+### Scan-first indexing (`OpenCsv/Scan.lean`: `filter_no_false_negatives`,
+`filter_absence_trustless`, `anchor_bearing_is_candidate`,
+`scan_exclusion_sound`, `scan_exclusion_sound_iff_absent`,
+`marker_zero_authority`, `markers_without_records_no_occurrence`,
+`served_list_falsifiable`)
+
+- **Statement.** Production indexing is scan-first (paper §4.7.1, amended):
+  anchor transactions carry a protocol-constant marker script so
+  BIP158-style compact filters identify anchor-bearing blocks; the wallet
+  downloads only candidate blocks and evaluates occurrences locally against
+  the bound-payload rule. The module models blocks as script/record sets and
+  a compact filter as the *image* of the script set under a deterministic
+  `filterItem` map. (i) No false negatives by construction
+  (`filter_no_false_negatives` — an image-membership lemma) and trustless
+  absence (`filter_absence_trustless` — its contrapositive). (ii) Every
+  anchor-bearing block is a candidate (`anchor_bearing_is_candidate`).
+  (iii) Headline: a local scan over the index (exactly the records of all
+  candidate blocks in the window) finds an occurrence of `raw_nf` iff one
+  exists on-chain in the window (`scan_exclusion_sound`, plus the
+  exclusion-form `scan_exclusion_sound_iff_absent`). (iv) Marker
+  zero-authority: a marked block with no well-formed record for `raw_nf`
+  yields no occurrence (`marker_zero_authority`) — the marker never enters
+  the occurrence definition. (v) Accelerator fraud provability: with
+  `deriveList : Block → List α` deterministic, any served `l ≠ deriveList
+  blk` yields an index where the lists differ — a short,
+  third-party-checkable witness (`served_list_falsifiable`).
+- **Paper.** §4.7.1 (amended): marker scripts, compact-filter candidate
+  selection, local occurrence evaluation; the first-occurrence rule itself
+  is unchanged (T3 in `Theorems.lean`).
+- **Rust.** `crates/opencsv-cbf` — the scan engine: `src/gcs.rs`
+  (BIP158 Golomb-coded sets; the model's `filterItem` abstracts the
+  keyed SipHash item map), `src/fullscan.rs` (zero-trust self-scan over a
+  bounded `[birth, spend]` window — `ChainOccurrence`/`ScanFinds` and the
+  window semantics documented there), and the occurrence test
+  `H("bind" ∥ raw_nf ∥ ctx)` against each candidate record
+  (`AnchorEntry.wellFormed` in `Interfaces.lean`).
+- **Hypotheses, not axioms.** The module needs **no new hardness
+  assumptions** (audit: only core axioms plus the pre-existing `bindHash`
+  constant through `wellFormed`). Two deployment facts appear as explicit
+  theorem hypotheses: `hmarked` (every block carrying a well-formed record
+  for `raw_nf` carries the marker — the protocol marking rule, coherent
+  with the anti-grief results since well-formed records require knowing
+  `raw_nf`) and, for the false-positive side, nothing at all — false
+  positives are a *remark* (bandwidth, never correctness), matching
+  §4.7.1's treatment; the correctness direction of (iii) holds because the
+  index contains nothing but real block records.
+- **Proof.** Pure set/list reasoning (`mem_map`, `mem_filter`,
+  `mem_flatMap`) plus one hand-rolled list-extensionality lemma; no `omega`,
+  no arithmetic.
 
 ## Where the cryptographic hardness lives (complete list)
 

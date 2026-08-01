@@ -1,3 +1,9 @@
+'OpenCsv.Scan.anchor_bearing_is_candidate' depends on axioms: [propext, Quot.sound]
+'OpenCsv.Scan.filter_absence_trustless' depends on axioms: [propext, Quot.sound]
+'OpenCsv.Scan.filter_no_false_negatives' depends on axioms: [propext, Quot.sound]
+'OpenCsv.Scan.marker_zero_authority' depends on axioms: [OpenCsv.bindHash]
+'OpenCsv.Scan.scan_exclusion_sound' depends on axioms: [propext, OpenCsv.bindHash, Quot.sound]
+'OpenCsv.Scan.served_list_falsifiable' depends on axioms: [propext, Classical.choice, Quot.sound]
 'OpenCsv.Value.carry_complete_single' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Value.carry_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
 'OpenCsv.Value.difference_interval_within_half_field' does not depend on any axioms
