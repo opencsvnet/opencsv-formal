@@ -34,6 +34,7 @@ OpenCsv/State.lean      # §6 item 2 — coin state machine (valid traces)
 OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
 OpenCsv/Scan.lean       # scan-first indexing model (paper §4.7.1)
+OpenCsv/Batch.lean      # batch envelope occurrence model (paper §4.7.2)
 ```
 
 ## What the theorems say, and what they correspond to
@@ -246,6 +247,47 @@ raw nullifier off-chain (consignments/proofs only). In the model:
 - **Proof.** Pure set/list reasoning (`mem_map`, `mem_filter`,
   `mem_flatMap`) plus one hand-rolled list-extensionality lemma; no `omega`,
   no arithmetic.
+
+### Batch envelopes (`OpenCsv/Batch.lean`: `batchChain`, `batchCommit`,
+`Envelope`, `BatchOccurrence`, `batch_commit_unique`, `batch_occurrence_iff`,
+`chainOccurrence_expandWindow`, `batch_exclusion_sound`,
+`coordinator_cannot_forge`, `coordinator_envelope_no_occurrence`)
+
+- **Statement.** Paper §4.7.2 batching: one transaction carries an envelope
+  of `N` payloads in its witness; output 0 holds
+  `batch_commit = H("batch" ∥ P_1 ∥ … ∥ P_n ∥ ctx)`; all payloads share the
+  batch's `ctx`. The model: `Envelope = (payloads, ctx, commit)` with
+  `wellFormed` = commitment recomputes, and `BatchOccurrence` = well-formed
+  ∧ some payload binds `raw_nf` under the shared ctx
+  (`batch_occurrence_iff` is the bridge). The commitment is modeled as a
+  length-tagged `bindHash` chain, so (i) `batch_commit_unique` — a batch
+  commitment determines its payload list — follows from
+  `bindHash_injective` alone (tampering with the envelope is detectable);
+  (ii) `batch_exclusion_sound` — the scan-first exclusion theorem extends
+  to envelope-carrying blocks by viewing envelopes as record-carriers
+  (each envelope contributes its payloads as entries under the shared ctx;
+  `chainOccurrence_expandWindow` does the bookkeeping, reusing
+  `Scan.scan_exclusion_sound` unchanged — solo anchors included as before);
+  (iii) `coordinator_cannot_forge` (+ `coordinator_envelope_no_occurrence`)
+  — a coordinator who sees only payloads cannot produce a new occurrence of
+  `raw_nf`, reusing `occurrence_requires_knowledge` (participant-authored
+  payloads are explicitly out of scope: the participant knows `raw_nf`,
+  which is exactly the knowledge the axiom ties a fresh well-formed entry
+  to).
+- **Paper.** §4.7.2.
+- **Rust.** No envelope code in `opencsv-rs` yet — this maps to the spec
+  section only; the record-carrier view lines up with
+  `AnchorEntry = (P, ctx)` in `Interfaces.lean` and the scan machinery of
+  `crates/opencsv-cbf`.
+- **Proof.** `batch_chain_unique` is a straight induction on equal-length
+  lists applying `bindHash_injective` at each layer; the length tag (the
+  model's `"batch"` domain separator) discharges cross-length cases. The
+  exclusion theorem is `mem_map`/`mem_append`/`mem_flatMap` plumbing around
+  one application of `Scan.scan_exclusion_sound`. **No new axioms** — the
+  audit shows `batch_commit_unique` depends on exactly
+  `[bindHash, bindHash_injective]` (plus Lean core), and the coordinator
+  theorems on the pre-existing `[KnowsRawNf, bindHash,
+  occurrence_requires_knowledge]`.
 
 ## Where the cryptographic hardness lives (complete list)
 
