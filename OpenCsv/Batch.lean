@@ -273,7 +273,8 @@ def maxSignedWeight (participantCount : Nat) : Nat :=
 def maxSignedVBytes (participantCount : Nat) : Nat :=
   (maxSignedWeight participantCount + 3) / 4
 
-/-- The protocol cap has the exact reviewed 28,040-WU bound. -/
+/-- The Rust reference profile's 64-participant cap has the exact reviewed
+28,040-WU bound. -/
 theorem max_signed_weight_at_cap : maxSignedWeight 64 = 28040 := by
   rfl
 
@@ -286,6 +287,19 @@ def sumBy {α : Type} (f : α → Nat) : List α → Nat
 inside its signed maximum charge. -/
 def ParticipantV2.funded (p : ParticipantV2) : Prop :=
   p.charge ≤ p.maxCharge ∧ p.feeValue = p.charge + p.changeValue
+
+/-- Frozen reusable-output floor used for stock and participant change. -/
+def minReusableOutputValue : Nat := 546
+
+/-- Proposal guards enforced by the C1 constructor before commitments are
+accepted.  Public-key/script well-formedness remains a Bitcoin-layer typed
+input obligation and is not represented by the abstract field carrier. -/
+def ProposalV2.Valid (proposal : ProposalV2) : Prop :=
+  proposal.chainId ≠ 0 ∧
+  proposal.stockInput ≠ 0 ∧
+  minReusableOutputValue ≤ proposal.stockValue ∧
+  0 < proposal.targetFeerate ∧
+  proposal.targetFeerate ≤ proposal.maxFeerate
 
 /-- Transaction inputs.  The stock outpoint is position 0; fee inputs follow
 the canonical participant list one-for-one. -/
@@ -320,6 +334,19 @@ structure ManifestV2 where
 def ManifestV2.protectedParticipants (manifest : ManifestV2) :
     List ProtectedParticipant :=
   manifest.participants.map ParticipantV2.protected
+
+/-- C1 rejects duplicate stable operations, payloads, and change scripts.
+Duplicate fee inputs are already excluded by `CanonicalParticipants`' strict
+ordering; identical commitment bodies are therefore excluded as well. -/
+def ManifestV2.ParticipantFieldsUnique (manifest : ManifestV2) : Prop :=
+  (manifest.protectedParticipants.map ProtectedParticipant.operationId).Nodup ∧
+  (manifest.protectedParticipants.map ProtectedParticipant.payload).Nodup ∧
+  (manifest.protectedParticipants.map ProtectedParticipant.changeScript).Nodup
+
+/-- Every participant change remains a reusable, standard output. -/
+def ManifestV2.ChangeOutputsReusable (manifest : ManifestV2) : Prop :=
+  ∀ participant ∈ manifest.participants,
+    minReusableOutputValue ≤ participant.changeValue
 
 /-- Ordered v2 payload envelope. -/
 def ManifestV2.payloads (manifest : ManifestV2) : List F :=
@@ -369,7 +396,10 @@ def ManifestV2.WellFormed (manifest : ManifestV2) : Prop :=
   manifest.proposal.observedTip < manifest.proposal.expiryHeight ∧
   manifest.proposal.targetFeerate ≤ manifest.feerate ∧
   manifest.feerate ≤ manifest.proposal.maxFeerate ∧
-  manifest.Unanimous
+  manifest.Unanimous ∧
+  manifest.proposal.Valid ∧
+  manifest.ParticipantFieldsUnique ∧
+  manifest.ChangeOutputsReusable
 
 /-- The reviewed Rust/CLI reference profile currently admits at most 64
 participants.  This is a local implementation and relay-resource policy, not
@@ -472,10 +502,24 @@ theorem manifest_value_conservation (manifest : ManifestV2)
         sumBy (fun participant => participant.changeValue) manifest.participants := by
   rcases hvalid with
     ⟨_hpositive, _hcount, _hcanonical, _hexact, hcharges,
-      hfunded, _hmarker, _hfee, _hexpiry, _htarget, _hmax, _hunanimous⟩
+      hfunded, _hmarker, _hfee, _hexpiry, _htarget, _hmax, _hunanimous,
+      _hproposal, _hunique, _hreusable⟩
   have hrows := participant_funding_conservation manifest.participants hfunded
   rw [hrows, hcharges]
   omega
+
+/-- A well-formed C1 manifest carries the constructor guards, duplicate-field
+rejection, and minimum reusable-change receipt explicitly. -/
+theorem manifest_c1_guards (manifest : ManifestV2)
+    (hvalid : manifest.WellFormed) :
+    manifest.proposal.Valid ∧
+      manifest.ParticipantFieldsUnique ∧
+      manifest.ChangeOutputsReusable := by
+  rcases hvalid with
+    ⟨_hpositive, _hcount, _hcanonical, _hexact, _hcharges,
+      _hfunded, _hmarker, _hfee, _hexpiry, _htarget, _hmax, _hunanimous,
+      hproposal, hunique, hreusable⟩
+  exact ⟨hproposal, hunique, hreusable⟩
 
 /-- Abstract field tag for the literal `OpenCSV/batch-v2/proposal` domain. -/
 def proposalDomainTag : F := 3
@@ -663,7 +707,8 @@ theorem c1_two_party_initial_valid : c1TwoPartyInitial.ReferenceWellFormed := by
     ManifestV2.WellFormed, CanonicalParticipants, ParticipantV2.funded,
     exactCharges, allocatedCharge, maxSignedVBytes, maxSignedWeight, sumBy,
     ManifestV2.Unanimous, ManifestV2.protectedParticipants,
-    ParticipantV2.protected]
+    ManifestV2.ParticipantFieldsUnique, ManifestV2.ChangeOutputsReusable,
+    ProposalV2.Valid, minReusableOutputValue, ParticipantV2.protected]
   decide
 
 theorem c1_two_party_replacement_valid : c1TwoPartyReplacement.ReferenceWellFormed := by
@@ -672,7 +717,8 @@ theorem c1_two_party_replacement_valid : c1TwoPartyReplacement.ReferenceWellForm
     ManifestV2.WellFormed, CanonicalParticipants, ParticipantV2.funded,
     exactCharges, allocatedCharge, maxSignedVBytes, maxSignedWeight, sumBy,
     ManifestV2.Unanimous, ManifestV2.protectedParticipants,
-    ParticipantV2.protected]
+    ManifestV2.ParticipantFieldsUnique, ManifestV2.ChangeOutputsReusable,
+    ProposalV2.Valid, minReusableOutputValue, ParticipantV2.protected]
   decide
 
 theorem c1_two_party_replacement_conforms :
@@ -889,6 +935,7 @@ theorem coordinator_envelope_no_occurrence {log : List AnchorEntry} {raw_nf : F}
 #print axioms signer_receipt_fresh
 #print axioms participant_funding_conservation
 #print axioms manifest_value_conservation
+#print axioms manifest_c1_guards
 #print axioms proposal_id_unique
 #print axioms chainOccurrence_expandWindow_v2
 #print axioms batch_v2_exclusion_sound

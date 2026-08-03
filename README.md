@@ -268,6 +268,13 @@ raw nullifier off-chain (consignments/proofs only). In the model:
   fee-outpoint-ordered participant. `manifest_fixed_positions`,
   `manifest_participant_alignment`, and
   `canonical_adjacent_swap_rejected` make those invariants explicit.
+- **C1 admission guards.** `ProposalV2.Valid` rejects zero chain/stock
+  identifiers, sub-floor reusable stock, and zero or inverted fee policy.
+  `ManifestV2.ParticipantFieldsUnique` rejects duplicate operation IDs,
+  payloads, and change scripts while strict outpoint ordering rejects duplicate
+  fee inputs. `ManifestV2.ChangeOutputsReusable` enforces the frozen 546-sat
+  participant-change floor. `manifest_c1_guards` exposes all three receipts
+  from the well-formedness relation without a new axiom.
 - **Fees and conservation.** The model separates core manifest validity from
   the current Rust/CLI reference profile's 64-participant resource cap,
   `968 + 423*N` WU formula, ceiling virtual size, miner fee, and exact
@@ -279,8 +286,8 @@ raw nullifier off-chain (consignments/proofs only). In the model:
   per-participant charges for the initial/replacement epochs.
 - **Replay and replacement.** `ProposalV2.id` commits the domain and complete
   proposal;
-  `proposal_id_unique` proves equal IDs imply every chain, stock, membership,
-  nonce, expiry, policy, and context field is equal. A
+  `proposal_id_unique` proves equal IDs imply every chain, stock, participant
+  count, nonce, expiry, policy, and context field is equal. A
   `ConformingReplacement` preserves the complete protected layout, header,
   stock principal, participant order, payloads, and scripts; advances one
   epoch; strictly raises feerate/miner fee; moves charges/change only in the

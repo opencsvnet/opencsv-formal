@@ -13,6 +13,7 @@
 'OpenCsv.Batch.chainOccurrence_expandWindow_v2' depends on axioms: [propext, OpenCsv.bindHash, Quot.sound]
 'OpenCsv.Batch.coordinator_cannot_forge' depends on axioms: [OpenCsv.KnowsRawNf, OpenCsv.bindHash, OpenCsv.occurrence_requires_knowledge]
 'OpenCsv.Batch.coordinator_envelope_no_occurrence' depends on axioms: [OpenCsv.KnowsRawNf, OpenCsv.bindHash, OpenCsv.occurrence_requires_knowledge]
+'OpenCsv.Batch.manifest_c1_guards' does not depend on any axioms
 'OpenCsv.Batch.manifest_fixed_positions' depends on axioms: [propext, OpenCsv.bindHash]
 'OpenCsv.Batch.manifest_participant_alignment' depends on axioms: [propext, OpenCsv.bindHash]
 'OpenCsv.Batch.manifest_value_conservation' depends on axioms: [propext, Quot.sound]
