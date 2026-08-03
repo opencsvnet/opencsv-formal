@@ -268,7 +268,8 @@ raw nullifier off-chain (consignments/proofs only). In the model:
   fee-outpoint-ordered participant. `manifest_fixed_positions`,
   `manifest_participant_alignment`, and
   `canonical_adjacent_swap_rejected` make those invariants explicit.
-- **Fees and conservation.** The model pins the 64-participant cap,
+- **Fees and conservation.** The model separates core manifest validity from
+  the current Rust/CLI reference profile's 64-participant resource cap,
   `968 + 423*N` WU formula, ceiling virtual size, miner fee, and exact
   quotient/remainder charge vector. It independently checks that charges sum
   to marker plus miner fee and proves both row-wise and whole-transaction
@@ -276,14 +277,22 @@ raw nullifier off-chain (consignments/proofs only). In the model:
   `manifest_value_conservation`. The executable `c1_two_party_*` receipts
   reproduce the Rust vectors: 908/1,362-sat miner fees and 727/954-sat
   per-participant charges for the initial/replacement epochs.
-- **Replay and replacement.** `ProposalV2.id` commits the complete proposal;
+- **Replay and replacement.** `ProposalV2.id` commits the domain and complete
+  proposal;
   `proposal_id_unique` proves equal IDs imply every chain, stock, membership,
   nonce, expiry, policy, and context field is equal. A
   `ConformingReplacement` preserves the complete protected layout, header,
   stock principal, participant order, payloads, and scripts; advances one
   epoch; strictly raises feerate/miner fee; moves charges/change only in the
   fee-safe direction; and requires the fresh stock-plus-all-participant signer
-  roster.
+  roster. Both endpoints must be well formed, so marker value, exact charge
+  allocation, conservation, and fee-policy bounds cannot be bypassed merely by
+  satisfying the monotonicity relation.
+- **Signer capabilities.** `VerifiedTipReceiptV2` makes maximum receipt age and
+  sign-time expiry proof-bearing. `SignerReadinessV2` keeps authoritative
+  public-input verification distinct from each signer's own private wallet
+  reservation; the model does not pretend one participant can prove another
+  participant's private lock.
 - **Rust correspondence.** These definitions match `BATCHING_V2.md` and
   `opencsv-bitcoin::batch_v2`; v1/v2 occurrence scanning matches
   `opencsv-core::batch` and `opencsv-cbf`.

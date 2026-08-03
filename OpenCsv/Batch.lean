@@ -349,12 +349,12 @@ def ManifestV2.Unanimous (manifest : ManifestV2) : Prop :=
   manifest.signers = manifest.proposal.stockOwner ::
     manifest.protectedParticipants.map ProtectedParticipant.feeOwner
 
-/-- Complete deterministic C1 validity relation.  The charge-vector equality
+/-- Core deterministic C1 validity relation.  The charge-vector equality
 freezes the quotient/remainder algorithm; the sum equality independently
-checks conservation against marker plus miner fee. -/
+checks conservation against marker plus miner fee.  Deployment resource caps
+are deliberately separate from protocol validity. -/
 def ManifestV2.WellFormed (manifest : ManifestV2) : Prop :=
   0 < manifest.proposal.participantCount ∧
-  manifest.proposal.participantCount ≤ 64 ∧
   manifest.proposal.participantCount = manifest.participants.length ∧
   CanonicalParticipants manifest.participants ∧
   manifest.participants.map ParticipantV2.charge =
@@ -370,6 +370,46 @@ def ManifestV2.WellFormed (manifest : ManifestV2) : Prop :=
   manifest.proposal.targetFeerate ≤ manifest.feerate ∧
   manifest.feerate ≤ manifest.proposal.maxFeerate ∧
   manifest.Unanimous
+
+/-- The reviewed Rust/CLI reference profile currently admits at most 64
+participants.  This is a local implementation and relay-resource policy, not
+a universal batching-protocol constant. -/
+def ManifestV2.ReferencePolicy (manifest : ManifestV2) : Prop :=
+  manifest.proposal.participantCount ≤ 64
+
+/-- Protocol validity plus the current Rust reference-profile policy. -/
+def ManifestV2.ReferenceWellFormed (manifest : ManifestV2) : Prop :=
+  manifest.WellFormed ∧ manifest.ReferencePolicy
+
+/-- A proof-bearing verified-tip receipt at signing time.  The receipt must
+cover the proposal author's observation, remain before expiry, and satisfy the
+caller's bounded maximum age. -/
+structure VerifiedTipReceiptV2 (proposal : ProposalV2) where
+  verifiedHeight : Nat
+  age : Nat
+  maxAge : Nat
+  coversObservation : proposal.observedTip ≤ verifiedHeight
+  beforeExpiry : verifiedHeight < proposal.expiryHeight
+  freshAtSign : age ≤ maxAge
+
+/-- Abstract proof-bearing signer capability.  Public input verification is
+shared, while the private reservation predicate is deliberately signer-local:
+one participant cannot prove another participant's wallet lock. -/
+structure SignerReadinessV2
+    (PublicInputsVerified OwnFeeInputReserved : ManifestV2 → Prop)
+    (manifest : ManifestV2) where
+  tip : VerifiedTipReceiptV2 manifest.proposal
+  manifestValid : manifest.WellFormed
+  publicInputsReceipt : PublicInputsVerified manifest
+  ownReservationReceipt : OwnFeeInputReserved manifest
+
+/-- The typed sign-time capability cannot contain an over-age tip receipt. -/
+theorem signer_receipt_fresh
+    {PublicInputsVerified OwnFeeInputReserved : ManifestV2 → Prop}
+    {manifest : ManifestV2}
+    (ready : SignerReadinessV2 PublicInputsVerified OwnFeeInputReserved manifest) :
+    ready.tip.age ≤ ready.tip.maxAge :=
+  ready.tip.freshAtSign
 
 /-- Fixed protocol positions, including unchanged stock value and script. -/
 theorem manifest_fixed_positions (manifest : ManifestV2) :
@@ -431,37 +471,44 @@ theorem manifest_value_conservation (manifest : ManifestV2)
       manifest.proposal.stockValue + manifest.markerValue + manifest.minerFee +
         sumBy (fun participant => participant.changeValue) manifest.participants := by
   rcases hvalid with
-    ⟨_hpositive, _hcap, _hcount, _hcanonical, _hexact, hcharges,
+    ⟨_hpositive, _hcount, _hcanonical, _hexact, hcharges,
       hfunded, _hmarker, _hfee, _hexpiry, _htarget, _hmax, _hunanimous⟩
   have hrows := participant_funding_conservation manifest.participants hfunded
   rw [hrows, hcharges]
   omega
 
-/-- The proposal identifier binds chain, stock, policy, nonce, and context.
-It is an abstract nested transcript hash mirroring the Rust canonical body. -/
+/-- Abstract field tag for the literal `OpenCSV/batch-v2/proposal` domain. -/
+def proposalDomainTag : F := 3
+
+/-- The proposal identifier binds the v2 proposal domain, chain, stock,
+policy, nonce, and context.  It is an abstract nested transcript hash mirroring
+the Rust canonical body and its domain wrapper. -/
 noncomputable def ProposalV2.id (proposal : ProposalV2) : F :=
-  bindHash proposal.chainId
-    (bindHash proposal.stockInput
-      (bindHash proposal.stockValue
-        (bindHash proposal.stockOwner
-          (bindHash proposal.stockScript
-            (bindHash proposal.participantCount
-              (bindHash proposal.proposalNonce
-                (bindHash proposal.observedTip
-                  (bindHash proposal.expiryHeight
-                    (bindHash proposal.targetFeerate
-                      (bindHash proposal.maxFeerate proposal.ctx))))))))))
+  bindHash proposalDomainTag
+    (bindHash proposal.chainId
+      (bindHash proposal.stockInput
+        (bindHash proposal.stockValue
+          (bindHash proposal.stockOwner
+            (bindHash proposal.stockScript
+              (bindHash proposal.participantCount
+                (bindHash proposal.proposalNonce
+                  (bindHash proposal.observedTip
+                    (bindHash proposal.expiryHeight
+                      (bindHash proposal.targetFeerate
+                        (bindHash proposal.maxFeerate proposal.ctx)))))))))))
 
 /-- Cross-chain replay would require a collision in the proposal transcript. -/
 theorem proposal_id_binds_chain {left right : ProposalV2}
-    (h : left.id = right.id) : left.chainId = right.chainId :=
-  (bindHash_injective _ _ _ _ h).1
+    (h : left.id = right.id) : left.chainId = right.chainId := by
+  have hbody := (bindHash_injective _ _ _ _ h).2
+  exact (bindHash_injective _ _ _ _ hbody).1
 
 /-- The complete proposal transcript is injective: equal identifiers imply
 equal network, stock, membership, expiry, fee policy, nonce, and context. -/
 theorem proposal_id_unique {left right : ProposalV2}
     (h : left.id = right.id) : left = right := by
   simp only [ProposalV2.id] at h
+  obtain ⟨_hdomain, h⟩ := bindHash_injective _ _ _ _ h
   obtain ⟨hchain, h⟩ := bindHash_injective _ _ _ _ h
   obtain ⟨hstock, h⟩ := bindHash_injective _ _ _ _ h
   obtain ⟨hvalue, h⟩ := bindHash_injective _ _ _ _ h
@@ -492,8 +539,12 @@ def ManifestV2.protectedLayout (manifest : ManifestV2) :
     ProposalV2 × List ProtectedParticipant :=
   (manifest.proposal, manifest.protectedParticipants)
 
-/-- Frozen C1 unanimous replacement relation. -/
+/-- Frozen C1 unanimous replacement relation.  Both endpoints must be valid;
+otherwise monotone-looking charge/change fields could still violate exact fee
+allocation, conservation, marker value, or the proposal's fee bounds. -/
 def ConformingReplacement (old new : ManifestV2) : Prop :=
+  old.WellFormed ∧
+  new.WellFormed ∧
   old.protectedLayout = new.protectedLayout ∧
   new.replacementEpoch = old.replacementEpoch + 1 ∧
   old.feerate < new.feerate ∧
@@ -506,13 +557,13 @@ including stock principal, participant order, payloads, and scripts. -/
 theorem replacement_preserves_protected_layout {old new : ManifestV2}
     (h : ConformingReplacement old new) :
     old.protectedLayout = new.protectedLayout :=
-  h.1
+  h.2.2.1
 
 /-- Header commitment is invariant across a conforming replacement. -/
 theorem replacement_preserves_header {old new : ManifestV2}
     (h : ConformingReplacement old new) :
     old.headerCommit = new.headerCommit := by
-  have hlayout := h.1
+  have hlayout := h.2.2.1
   have hproposal : old.proposal = new.proposal := congrArg Prod.fst hlayout
   have hparticipants : old.protectedParticipants = new.protectedParticipants :=
     congrArg Prod.snd hlayout
@@ -524,23 +575,31 @@ theorem replacement_preserves_stock {old new : ManifestV2}
     (h : ConformingReplacement old new) :
     old.proposal.stockValue = new.proposal.stockValue ∧
       old.proposal.stockScript = new.proposal.stockScript := by
-  have hlayout := h.1
+  have hlayout := h.2.2.1
   exact
     ⟨congrArg (fun layout => layout.1.stockValue) hlayout,
       congrArg (fun layout => layout.1.stockScript) hlayout⟩
+
+/-- The marker value cannot change across a conforming replacement. -/
+theorem replacement_preserves_marker {old new : ManifestV2}
+    (h : ConformingReplacement old new) :
+    old.markerValue = new.markerValue := by
+  have hold : old.markerValue = 546 := h.1.2.2.2.2.2.2.1
+  have hnew : new.markerValue = 546 := h.2.1.2.2.2.2.2.2.1
+  exact hold.trans hnew.symm
 
 /-- A conforming replacement is epoch- and fee-monotone. -/
 theorem replacement_monotone {old new : ManifestV2}
     (h : ConformingReplacement old new) :
     new.replacementEpoch = old.replacementEpoch + 1 ∧
       old.feerate < new.feerate ∧ old.minerFee < new.minerFee :=
-  ⟨h.2.1, h.2.2.1, h.2.2.2.1⟩
+  ⟨h.2.2.2.1, h.2.2.2.2.1, h.2.2.2.2.2.1⟩
 
 /-- No unilateral fee bump: the replacement relation requires the complete
 stock-plus-participant signer roster for the new manifest. -/
 theorem replacement_requires_unanimity {old new : ManifestV2}
     (h : ConformingReplacement old new) : new.Unanimous :=
-  h.2.2.2.2.2
+  h.2.2.2.2.2.2.2
 
 /-! ## Executable two-participant C1 receipt -/
 
@@ -598,16 +657,18 @@ def c1TwoPartyReplacement : ManifestV2 :=
     replacementEpoch := 1
     signers := [90, 11, 22] }
 
-theorem c1_two_party_initial_valid : c1TwoPartyInitial.WellFormed := by
+theorem c1_two_party_initial_valid : c1TwoPartyInitial.ReferenceWellFormed := by
   simp [c1TwoPartyInitial, c1TwoPartyProposal, c1Participant,
+    ManifestV2.ReferenceWellFormed, ManifestV2.ReferencePolicy,
     ManifestV2.WellFormed, CanonicalParticipants, ParticipantV2.funded,
     exactCharges, allocatedCharge, maxSignedVBytes, maxSignedWeight, sumBy,
     ManifestV2.Unanimous, ManifestV2.protectedParticipants,
     ParticipantV2.protected]
   decide
 
-theorem c1_two_party_replacement_valid : c1TwoPartyReplacement.WellFormed := by
+theorem c1_two_party_replacement_valid : c1TwoPartyReplacement.ReferenceWellFormed := by
   simp [c1TwoPartyReplacement, c1TwoPartyProposal, c1Participant,
+    ManifestV2.ReferenceWellFormed, ManifestV2.ReferencePolicy,
     ManifestV2.WellFormed, CanonicalParticipants, ParticipantV2.funded,
     exactCharges, allocatedCharge, maxSignedVBytes, maxSignedWeight, sumBy,
     ManifestV2.Unanimous, ManifestV2.protectedParticipants,
@@ -616,6 +677,7 @@ theorem c1_two_party_replacement_valid : c1TwoPartyReplacement.WellFormed := by
 
 theorem c1_two_party_replacement_conforms :
     ConformingReplacement c1TwoPartyInitial c1TwoPartyReplacement := by
+  refine ⟨c1_two_party_initial_valid.1, c1_two_party_replacement_valid.1, ?_⟩
   simp [ConformingReplacement, c1TwoPartyInitial, c1TwoPartyReplacement,
     c1TwoPartyProposal, c1Participant, ManifestV2.protectedLayout,
     ManifestV2.protectedParticipants, ParticipantV2.protected,
@@ -824,6 +886,7 @@ theorem coordinator_envelope_no_occurrence {log : List AnchorEntry} {raw_nf : F}
 #print axioms manifest_fixed_positions
 #print axioms manifest_participant_alignment
 #print axioms manifest_vector_lengths
+#print axioms signer_receipt_fresh
 #print axioms participant_funding_conservation
 #print axioms manifest_value_conservation
 #print axioms proposal_id_unique
@@ -831,6 +894,7 @@ theorem coordinator_envelope_no_occurrence {log : List AnchorEntry} {raw_nf : F}
 #print axioms batch_v2_exclusion_sound
 #print axioms replacement_preserves_header
 #print axioms replacement_preserves_stock
+#print axioms replacement_preserves_marker
 #print axioms replacement_monotone
 #print axioms replacement_requires_unanimity
 #print axioms c1_two_party_initial_valid

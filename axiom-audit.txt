@@ -6,7 +6,7 @@
 'OpenCsv.Batch.batch_v2_exclusion_sound' depends on axioms: [propext, OpenCsv.bindHash, Quot.sound]
 'OpenCsv.Batch.batch_v2_occurrence_iff' depends on axioms: [OpenCsv.bindHash]
 'OpenCsv.Batch.c1_two_party_initial_valid' depends on axioms: [propext, Quot.sound]
-'OpenCsv.Batch.c1_two_party_replacement_conforms' depends on axioms: [propext]
+'OpenCsv.Batch.c1_two_party_replacement_conforms' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Batch.c1_two_party_replacement_valid' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Batch.canonical_adjacent_swap_rejected' depends on axioms: [propext]
 'OpenCsv.Batch.chainOccurrence_expandWindow' depends on axioms: [propext, OpenCsv.bindHash, Quot.sound]
@@ -22,8 +22,10 @@
 'OpenCsv.Batch.proposal_id_unique' depends on axioms: [propext, OpenCsv.bindHash, OpenCsv.bindHash_injective]
 'OpenCsv.Batch.replacement_monotone' does not depend on any axioms
 'OpenCsv.Batch.replacement_preserves_header' depends on axioms: [OpenCsv.bindHash]
+'OpenCsv.Batch.replacement_preserves_marker' does not depend on any axioms
 'OpenCsv.Batch.replacement_preserves_stock' does not depend on any axioms
 'OpenCsv.Batch.replacement_requires_unanimity' does not depend on any axioms
+'OpenCsv.Batch.signer_receipt_fresh' does not depend on any axioms
 'OpenCsv.Batch.versioned_commit_no_fallback' depends on axioms: [propext, OpenCsv.bindHash, OpenCsv.bindHash_injective]
 'OpenCsv.Batch.versioned_commit_unique' depends on axioms: [propext, Classical.choice, OpenCsv.bindHash, OpenCsv.bindHash_injective, Quot.sound]
 'OpenCsv.Scan.anchor_bearing_is_candidate' depends on axioms: [propext, Quot.sound]
