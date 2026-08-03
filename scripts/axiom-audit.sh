@@ -14,7 +14,12 @@ cd "$(dirname "$0")/.."
 
 LAKE="${LAKE:-$(command -v lake || echo "$HOME/.elan/bin/lake")}"
 
-AUDIT=$("$LAKE" build 2>&1 | sed -E 's/^info: [^ ]+ //' | grep -v 'ℹ\|Build completed' | awk '
+# Lake emits progress lines both when it replays (`ℹ`) and when it rebuilds
+# (`✔`) a target.  Neither is theorem output; allowing a rebuild line through
+# would append it to the preceding multi-line `#print axioms` record and make
+# the checked baseline depend on cache state.
+AUDIT=$("$LAKE" build 2>&1 | sed -E 's/^info: [^ ]+ //' |
+  grep -vE '^(ℹ|✔|✖)|Build completed' | awk '
   /^'\''/ { if (e != "") print e; e = $0; next }
   { e = e " " $0 }
   END { if (e != "") print e }' | sed -E 's/ +/ /g; s/\], /],/g' | LC_ALL=C sort)

@@ -34,7 +34,7 @@ OpenCsv/State.lean      # §6 item 2 — coin state machine (valid traces)
 OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
 OpenCsv/Scan.lean       # scan-first indexing model (paper §4.7.1)
-OpenCsv/Batch.lean      # batch envelope occurrence model (paper §4.7.2)
+OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
 ```
 
 ## What the theorems say, and what they correspond to
@@ -248,46 +248,50 @@ raw nullifier off-chain (consignments/proofs only). In the model:
   `mem_flatMap`) plus one hand-rolled list-extensionality lemma; no `omega`,
   no arithmetic.
 
-### Batch envelopes (`OpenCsv/Batch.lean`: `batchChain`, `batchCommit`,
-`Envelope`, `BatchOccurrence`, `batch_commit_unique`, `batch_occurrence_iff`,
-`chainOccurrence_expandWindow`, `batch_exclusion_sound`,
-`coordinator_cannot_forge`, `coordinator_envelope_no_occurrence`)
+### Batch envelopes and batching v2 (`OpenCsv/Batch.lean`)
 
-- **Statement.** Paper §4.7.2 batching: one transaction carries an envelope
-  of `N` payloads in its witness; output 0 holds
-  `batch_commit = H("batch" ∥ P_1 ∥ … ∥ P_n ∥ ctx)`; all payloads share the
-  batch's `ctx`. The model: `Envelope = (payloads, ctx, commit)` with
-  `wellFormed` = commitment recomputes, and `BatchOccurrence` = well-formed
-  ∧ some payload binds `raw_nf` under the shared ctx
-  (`batch_occurrence_iff` is the bridge). The commitment is modeled as a
-  length-tagged `bindHash` chain, so (i) `batch_commit_unique` — a batch
-  commitment determines its payload list — follows from
-  `bindHash_injective` alone (tampering with the envelope is detectable);
-  (ii) `batch_exclusion_sound` — the scan-first exclusion theorem extends
-  to envelope-carrying blocks by viewing envelopes as record-carriers
-  (each envelope contributes its payloads as entries under the shared ctx;
-  `chainOccurrence_expandWindow` does the bookkeeping, reusing
-  `Scan.scan_exclusion_sound` unchanged — solo anchors included as before);
-  (iii) `coordinator_cannot_forge` (+ `coordinator_envelope_no_occurrence`)
-  — a coordinator who sees only payloads cannot produce a new occurrence of
-  `raw_nf`, reusing `occurrence_requires_knowledge` (participant-authored
-  payloads are explicitly out of scope: the participant knows `raw_nf`,
-  which is exactly the knowledge the axiom ties a fresh well-formed entry
-  to).
-- **Paper.** §4.7.2.
-- **Rust.** No envelope code in `opencsv-rs` yet — this maps to the spec
-  section only; the record-carrier view lines up with
-  `AnchorEntry = (P, ctx)` in `Interfaces.lean` and the scan machinery of
-  `crates/opencsv-cbf`.
-- **Proof.** `batch_chain_unique` is a straight induction on equal-length
-  lists applying `bindHash_injective` at each layer; the length tag (the
-  model's `"batch"` domain separator) discharges cross-length cases. The
-  exclusion theorem is `mem_map`/`mem_append`/`mem_flatMap` plumbing around
-  one application of `Scan.scan_exclusion_sound`. **No new axioms** — the
-  audit shows `batch_commit_unique` depends on exactly
-  `[bindHash, bindHash_injective]` (plus Lean core), and the coordinator
-  theorems on the pre-existing `[KnowsRawNf, bindHash,
-  occurrence_requires_knowledge]`.
+- **Envelope occurrence.** The original paper §4.7.2 model remains: a
+  length-tagged `bindHash` chain commits an ordered payload envelope and its
+  shared input-0 context. `batch_commit_unique`, `batch_occurrence_iff`,
+  `batch_exclusion_sound`, and the coordinator anti-forgery theorems retain
+  their previous statements.
+- **Fail-closed versioning.** `versionedBatchCommit` gives the literal
+  `batch` and `batch-v2` domains distinct outer tags.
+  `versioned_commit_no_fallback` proves they cannot be reinterpreted across
+  versions; `versioned_commit_unique` fixes ordered payloads and context.
+  `batch_v2_exclusion_sound` specializes compact-filter scanning to envelopes
+  that recompute under the v2 domain.
+- **Frozen C1 transaction.** `ProposalV2`, `ParticipantV2`, and `ManifestV2`
+  model the implemented signed-stock/co-funded shape. Input 0 is stock;
+  outputs 0/1/2 are header, 546-sat marker, and unchanged stock; each later
+  input, payload, charge, and change belongs to the same strictly
+  fee-outpoint-ordered participant. `manifest_fixed_positions`,
+  `manifest_participant_alignment`, and
+  `canonical_adjacent_swap_rejected` make those invariants explicit.
+- **Fees and conservation.** The model pins the 64-participant cap,
+  `968 + 423*N` WU formula, ceiling virtual size, miner fee, and exact
+  quotient/remainder charge vector. It independently checks that charges sum
+  to marker plus miner fee and proves both row-wise and whole-transaction
+  conservation in `participant_funding_conservation` and
+  `manifest_value_conservation`. The executable `c1_two_party_*` receipts
+  reproduce the Rust vectors: 908/1,362-sat miner fees and 727/954-sat
+  per-participant charges for the initial/replacement epochs.
+- **Replay and replacement.** `ProposalV2.id` commits the complete proposal;
+  `proposal_id_unique` proves equal IDs imply every chain, stock, membership,
+  nonce, expiry, policy, and context field is equal. A
+  `ConformingReplacement` preserves the complete protected layout, header,
+  stock principal, participant order, payloads, and scripts; advances one
+  epoch; strictly raises feerate/miner fee; moves charges/change only in the
+  fee-safe direction; and requires the fresh stock-plus-all-participant signer
+  roster.
+- **Rust correspondence.** These definitions match `BATCHING_V2.md` and
+  `opencsv-bitcoin::batch_v2`; v1/v2 occurrence scanning matches
+  `opencsv-core::batch` and `opencsv-cbf`.
+- **Assumptions.** No new project axiom. Structural ordering, alignment,
+  arithmetic, conservation, and replacement results use only Lean logic.
+  Commitment/replay uniqueness reuses the existing `bindHash_injective`;
+  coordinator anti-forgery continues to reuse only the existing raw-nullifier
+  knowledge assumption.
 
 ## Where the cryptographic hardness lives (complete list)
 
