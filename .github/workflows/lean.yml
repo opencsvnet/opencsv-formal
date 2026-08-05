@@ -10,6 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Read pinned Rust correspondence revision
+        id: rust-pin
+        run: |
+          python3 -c 'import json; print("ref=" + json.load(open("rust-correspondence-v4.json"))["commit"])' >> "$GITHUB_OUTPUT"
+      - name: Check out pinned Rust implementation
+        uses: actions/checkout@v4
+        with:
+          repository: opencsvnet/opencsv-rs
+          ref: ${{ steps.rust-pin.outputs.ref }}
+          path: opencsv-rs
+      - name: V4 Lean/Rust source correspondence gate
+        run: python3 scripts/check-v4-rust-correspondence.py --rust-dir opencsv-rs
       - name: Install elan (Lean toolchain)
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y

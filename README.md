@@ -24,6 +24,8 @@ end of `OpenCsv/Theorems.lean` printing the exact assumptions of each headline
 theorem. The development contains **no `sorry` and no `admit`** (grep it);
 every cryptographic hardness assumption is an explicitly labeled `axiom` in
 `OpenCsv/Interfaces.lean` or the `sound` field of the `ProofSystem` structure.
+The current baseline audits **61 named declarations**: 54 from the reviewed
+state/value/scan/batching model plus seven v4 one-input specializations.
 
 ## Layout
 
@@ -35,6 +37,7 @@ OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
 OpenCsv/Scan.lean       # scan-first indexing model (paper §4.7.1)
 OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
+OpenCsv/Forward.lean    # v4 one-input/two-output forwarding specialization
 ```
 
 ## What the theorems say, and what they correspond to
@@ -49,11 +52,11 @@ OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
   supply function of §4.9 as the right-hand side.
 - **Rust.** The mint-side conditions abstract the mint predicate AIR of
   `crates/opencsv-pcd/src/mint.rs` (`Σ v_i = V`, `mint_commit` binding, output
-  commitment recomputation) plus the issuer-signature check of
-  `crates/opencsv-core/src/accept.rs` (kept off-circuit in the prototype — see
-  "Not mechanized" below). The redeem-side conditions abstract the redeem
-  circuit described in `crates/opencsv-pcd/src/node.rs` (public `V` = coin
-  value, ownership, nullifier). The supply equation is
+  commitment recomputation) and the authenticated v3/v4 issuer-seed relation
+  in `crates/opencsv-pcd/src/issuer.rs` / `node.rs`. Lean's abstract
+  `SigVerify` expresses the authorization property, not the retired external
+  Ed25519 wire format. The redeem-side conditions abstract the redeem circuit
+  in `node.rs` (public `V` = coin value, ownership, nullifier). The supply equation is
   `crates/opencsv-core/src/audit.rs` (`supply`).
 - **Proof.** Induction over the `ValidTrace` inductive; each step preserves a
   natural-number balance equation (the integer form follows by `omega`).
@@ -72,6 +75,34 @@ OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
 - **Proof.** Inversion on the trace inductive (`ValidTrace.inv_snoc`) — the
   property is a constructor condition of `StepValid`, proved as a lemma anyway
   per the roadmap.
+
+#### Proof-lineage v4 one-input forwarding (`OpenCsv/Forward.lean`)
+
+- **Statement shape.** `v4OneInputStatement` exposes one real nullifier,
+  exactly zero in the compatibility padding slot, and the commitments of the
+  recipient and change outputs. `v4_one_input_statement_exact` fixes all four
+  fields; `v4_one_input_slots_distinct` shows a nonzero real nullifier cannot
+  alias padding. The padding slot never creates a second spend or anchor.
+- **Semantics.** `oneInputForwarding` is exactly
+  `Step.transfer [spend] [recipient, change] ctx`.
+  `one_input_forwarding_valid_iff` expands validity into ownership/nullifier
+  correctness, predecessor liveness, and per-asset conservation.
+  `one_input_forwarding_conservation` and
+  `one_input_forwarding_value_equation` prove recipient plus change equals the
+  one consumed coin; `one_input_forwarding_pool_unchanged` specializes T2/T1
+  supply preservation; `one_input_forwarding_anchor_exact` proves only the
+  real nullifier is context-bound on-chain.
+- **Rust correspondence.** These definitions mirror proof lineage v4 in
+  `crates/opencsv-pcd/src/node.rs`: one authenticated predecessor, statement
+  version 4, `nf_1` real, `nf_2 = 0`, two output commitments, and exact
+  conservation. CI checks the exact pinned Rust revision in
+  `rust-correspondence-v4.json` and fails if those constants, constraints,
+  field ordering, native statement projection, version test, or verifier tag
+  drift. The Lean model proves the state semantics and statement projection;
+  the source gate only links that model to a reviewed Rust shape. It does not
+  claim to verify the AIR implementation or postcard envelope; those remain
+  covered by Rust construction/adversarial tests and the explicit proof-system
+  trust boundary below.
 
 ### T3 — Nullifier uniqueness (`nullifier_unique`, `first_occurrence_unique`,
 `later_occurrence_rejected`, `payload_binds_one_nullifier`,
@@ -334,12 +365,11 @@ not assumptions of the development.
 - **Poseidon cryptanalysis** — the hash appears only through the injectivity
   (collision-resistance) hypotheses above. No concrete Poseidon, no BabyBear
   field arithmetic.
-- **The off-circuit Ed25519 issuer signature of the prototype** — the Rust
-  prototype verifies the issuer signature outside the circuit
-  (`crates/opencsv-core`, deviation documented in
-  `crates/opencsv-pcd/src/mint.rs`); the formalization models the paper's
-  target (issuer authorization as part of the mint predicate's validity
-  conditions) via the abstract `SigVerify` / `sig_unforgeable` interface.
+- **Concrete issuer-seed AIR soundness** — authenticated proof lineages v3/v4
+  prove issuer-seed knowledge in-circuit. This model captures the authorization
+  property through `SigVerify` / `sig_unforgeable`, but does not prove that the
+  concrete Poseidon2/AIR constraints implement that abstraction. Retired
+  off-circuit Ed25519 records are historical/read-only, not the modeled target.
 - **The hash-compressed multi-input anchor** (`XFERC`, `H(nf_1 ∥ … ∥ nf_m)` in
   `crates/opencsv-core/src/anchor.rs`) — the model's anchor log records
   individual nullifier keys; the compressed variant is an encoding detail of
