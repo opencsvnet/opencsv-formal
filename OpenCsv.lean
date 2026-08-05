@@ -5,3 +5,4 @@ import OpenCsv.Value
 import OpenCsv.Scan
 import OpenCsv.Batch
 import OpenCsv.Forward
+import OpenCsv.Lineage

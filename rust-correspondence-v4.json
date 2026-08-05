@@ -1,8 +1,10 @@
 {
   "repository": "opencsvnet/opencsv-rs",
-  "commit": "6278eaeac5bafa2f6c71fdd603dd34b3331df5b7",
+  "commit": "9b9eca2c1a31a780bde7534c4c5b34d1da66b7ce",
   "proof_version": 4,
   "legacy_proof_version": 3,
+  "distinct_selector_bits": 3,
+  "legacy_recursive_policy": "mint-only",
   "outputs": 2,
   "vk_tag": "opencsv-pcd-coin-v4-with-v3-fri94"
 }

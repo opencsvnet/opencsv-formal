@@ -24,8 +24,9 @@ end of `OpenCsv/Theorems.lean` printing the exact assumptions of each headline
 theorem. The development contains **no `sorry` and no `admit`** (grep it);
 every cryptographic hardness assumption is an explicitly labeled `axiom` in
 `OpenCsv/Interfaces.lean` or the `sound` field of the `ProofSystem` structure.
-The current baseline audits **61 named declarations**: 54 from the reviewed
-state/value/scan/batching model plus seven v4 one-input specializations.
+The current baseline audits **72 named declarations**: 54 from the reviewed
+state/value/scan/batching model, seven v4 one-input specializations, and eleven
+recursive-lineage/tree declarations.
 
 ## Layout
 
@@ -38,6 +39,7 @@ OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
 OpenCsv/Scan.lean       # scan-first indexing model (paper §4.7.1)
 OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
 OpenCsv/Forward.lean    # v4 one-input/two-output forwarding specialization
+OpenCsv/Lineage.lean    # unfolded PCD tree, exact edges, distinct inputs, version policy
 ```
 
 ## What the theorems say, and what they correspond to
@@ -103,6 +105,31 @@ OpenCsv/Forward.lean    # v4 one-input/two-output forwarding specialization
   claim to verify the AIR implementation or postcard envelope; those remain
   covered by Rust construction/adversarial tests and the explicit proof-system
   trust boundary below.
+
+#### Recursive PCD lineage (`OpenCsv/Lineage.lean`)
+
+- **Tree shape.** `ProofLineage` records the root version/step, immediate
+  predecessor proof trees, and output selectors. `EdgesMatch` pairs every
+  predecessor and selector with exactly one consumed spend; its length theorem
+  rules out silent list truncation. The tree is the unfolded serialized proof
+  view; an implementation may cache identical subtrees as a DAG without
+  changing any local edge result.
+- **Recursive validity.** Every immediate predecessor is itself valid, its
+  selected root output equals the consumed coin, ownership/nullifier witnesses
+  are valid, and per-asset conservation holds at every transfer root.
+  `two_input_lineage_distinct` proves that a two-input recursive node contains
+  neither a repeated coin nor a repeated nullifier.
+- **Fail-closed migration.** Transfer and redeem nodes are v4. An
+  ancestor-free v3 mint may be a migration leaf, while
+  `legacy_transfer_lineage_impossible` and
+  `legacy_redeem_lineage_impossible` exclude unsafe legacy recursive nodes.
+  `v4_one_input_lineage_valid_iff` connects the tree directly to the existing
+  recipient-plus-change specialization.
+- **Rust correspondence.** CI pins exact `opencsv-rs@9b9eca2` and checks the
+  AIR distinct-input selector/inversion constraint, production v4-root gate,
+  mint-only v3 predecessor policy, and adversarial Rust receipts as well as the
+  earlier one-input statement shape. This remains a source-drift gate, not a
+  Lean proof of Rust/AIR/FRI equivalence.
 
 ### T3 — Nullifier uniqueness (`nullifier_unique`, `first_occurrence_unique`,
 `later_occurrence_rejected`, `payload_binds_one_nullifier`,
@@ -362,6 +389,11 @@ not assumptions of the development.
 - **AIR/FRI soundness** — the proof system `Π` appears only through its
   abstract soundness field. Proving FRI sound is a proof-system-level result
   for a dedicated formalization (paper §6).
+- **Exact root-circuit commitment authorization** — recursive predecessor keys
+  are bound and production acceptance is version-gated, but the native verifier
+  still accepts self-described root common data. Distribution and enforcement
+  of the exact authorized root-circuit identities remains an explicit security
+  boundary; the lineage theorems do not claim it is solved.
 - **Poseidon cryptanalysis** — the hash appears only through the injectivity
   (collision-resistance) hypotheses above. No concrete Poseidon, no BabyBear
   field arithmetic.

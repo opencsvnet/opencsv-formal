@@ -2,9 +2,10 @@
 """Fail closed if the pinned Rust v4 statement shape drifts from Lean.
 
 This is deliberately a source-correspondence gate, not a Rust or AIR proof.
-Lean proves the protocol semantics of the shape in OpenCsv/Forward.lean; this
-script makes CI check that the exact pinned Rust source still exposes that
-shape before the two artifacts are described as corresponding.
+Lean proves the protocol semantics of the shape in OpenCsv/Forward.lean and
+the recursive tree/version/distinctness rules in OpenCsv/Lineage.lean. This
+script makes CI check that the exact pinned Rust source still exposes those
+rules before the artifacts are described as corresponding.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ def main() -> None:
         )
 
     node = (rust / "crates/opencsv-pcd/src/node.rs").read_text()
+    accept = (rust / "crates/opencsv-pcd/src/accept.rs").read_text()
     security = (rust / "crates/opencsv-pcd/src/security.rs").read_text()
     tests = (rust / "crates/opencsv-pcd/tests/node.rs").read_text()
 
@@ -117,6 +119,66 @@ def main() -> None:
         "native v4 statement projection changed",
     )
     require(
+        node,
+        f"+ {pin['distinct_selector_bits']}; // 111",
+        "two-input distinctness witness width changed",
+    )
+    require(
+        node,
+        """
+        enforce_distinct_digest(
+            &mut builder,
+            &in_commitments[0],
+            &in_commitments[1],
+            witness.distinct_limb_bits,
+        );
+        """,
+        "two-input in-circuit distinctness constraint changed",
+    )
+    require(
+        node,
+        """
+        let selected = builder.select(selector_bits[2], quartet[1], quartet[0]);
+        let one = const_expr(builder, BabyBear::ONE);
+        let inverse = builder.div(one, selected);
+        let check = builder.mul(selected, inverse);
+        builder.connect(check, one);
+        """,
+        "selected unequal-limb inversion constraint changed",
+    )
+    require(
+        node,
+        """
+        version == COIN_PROOF_VERSION
+            || (version == LEGACY_COIN_PROOF_VERSION && mode == NodeMode::Mint)
+        """,
+        "legacy recursive predecessor policy changed",
+    )
+    require(
+        accept,
+        """
+        if !root_lineage_is_current(coin.version) {
+            return false;
+        }
+        """,
+        "production current-root boundary changed",
+    )
+    require(
+        node,
+        "fn digest_distinctness_is_an_in_circuit_constraint()",
+        "in-circuit distinctness adversarial receipt changed",
+    )
+    require(
+        node,
+        "fn legacy_recursive_policy_allows_only_ancestor_free_mints()",
+        "legacy recursive policy receipt changed",
+    )
+    require(
+        accept,
+        "fn production_accepts_only_the_current_root_lineage()",
+        "production root-version receipt changed",
+    )
+    require(
         security,
         f'pub const COIN_VK_TAG: &[u8] = b"{pin["vk_tag"]}";',
         "fail-closed verifier-set tag changed",
@@ -140,6 +202,9 @@ def main() -> None:
         "real_nullifiers": 1,
         "padding_nullifier": 0,
         "outputs": pin["outputs"],
+        "distinct_selector_bits": pin["distinct_selector_bits"],
+        "legacy_recursive_policy": pin["legacy_recursive_policy"],
+        "production_root_version": pin["proof_version"],
         "conservation": "input + zero = recipient + change",
         "vk_tag": pin["vk_tag"],
         "scope": "source correspondence; Lean proves protocol semantics, not Rust/AIR equivalence",

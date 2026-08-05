@@ -20,7 +20,7 @@ jobs:
           repository: opencsvnet/opencsv-rs
           ref: ${{ steps.rust-pin.outputs.ref }}
           path: opencsv-rs
-      - name: V4 Lean/Rust source correspondence gate
+      - name: V4 forwarding and recursive-lineage source correspondence gate
         run: python3 scripts/check-v4-rust-correspondence.py --rust-dir opencsv-rs
       - name: Install elan (Lean toolchain)
         run: |
