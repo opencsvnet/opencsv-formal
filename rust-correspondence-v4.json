@@ -1,10 +1,15 @@
 {
   "repository": "opencsvnet/opencsv-rs",
-  "commit": "9b9eca2c1a31a780bde7534c4c5b34d1da66b7ce",
+  "commit": "1288977c6110d6d985b5ea51589007d271e35674",
   "proof_version": 4,
   "legacy_proof_version": 3,
   "distinct_selector_bits": 3,
   "legacy_recursive_policy": "mint-only",
   "outputs": 2,
-  "vk_tag": "opencsv-pcd-coin-v4-with-v3-fri94"
+  "vk_tag": "opencsv-pcd-coin-v4-with-v3-fri94",
+  "baby_bear_modulus": 2013265921,
+  "baby_bear_modulus_hex": "0x7800_0001",
+  "account_config_generation": 2,
+  "checkpoint_version": 4,
+  "deployment_id": "opencsv-test-usd-v2"
 }

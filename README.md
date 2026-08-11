@@ -24,9 +24,11 @@ end of `OpenCsv/Theorems.lean` printing the exact assumptions of each headline
 theorem. The development contains **no `sorry` and no `admit`** (grep it);
 every cryptographic hardness assumption is an explicitly labeled `axiom` in
 `OpenCsv/Interfaces.lean` or the `sound` field of the `ProofSystem` structure.
-The current baseline audits **72 named declarations**: 54 from the reviewed
-state/value/scan/batching model, seven v4 one-input specializations, and eleven
-recursive-lineage/tree declarations.
+The current baseline audits **77 named declarations**: the previous 72
+state/value/scan/batching/forwarding/lineage results plus five strict
+BabyBear-encoding declarations. The count is generated from
+`axiom-audit.txt`; if a later edit changes it, the audit and this text must be
+reviewed together.
 
 ## Layout
 
@@ -36,6 +38,7 @@ OpenCsv/Interfaces.lean # §6 item 1 — abstract crypto interfaces + ALL assump
 OpenCsv/State.lean      # §6 item 2 — coin state machine (valid traces)
 OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
+OpenCsv/Encoding.lean   # strict canonical BabyBear digest encoding
 OpenCsv/Scan.lean       # scan-first indexing model (paper §4.7.1)
 OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
 OpenCsv/Forward.lean    # v4 one-input/two-output forwarding specialization
@@ -43,6 +46,25 @@ OpenCsv/Lineage.lean    # unfolded PCD tree, exact edges, distinct inputs, versi
 ```
 
 ## What the theorems say, and what they correspond to
+
+### Canonical digest encoding (`OpenCsv/Encoding.lean`)
+
+- **Statement.** A serialized digest contains exactly eight BabyBear limbs.
+  A limb is accepted only when its decoded integer is below
+  `p = 2,013,265,921`; two accepted digests that denote the same eight field
+  values have identical integer encodings. The explicit twin theorem shows
+  why reduction is insufficient: `0` and `p` are different integers with the
+  same value modulo `p`, and the strict decoder rejects `p`.
+- **Rust.** `crates/opencsv-core/src/digest.rs` checks every little-endian
+  `u32` in `Digest::deserialize`; CLI and FFI coin randomness uses shared
+  rejection sampling for uniform canonical limbs; consignment and accept tests
+  reject non-canonical twins. The source-correspondence gate pins the modulus,
+  strict comparison, eight-limb shape, and reset boundary.
+- **Scope.** Lean starts after four-byte little-endian chunks have been parsed
+  into natural numbers. It proves representation uniqueness, not the Rust
+  byte parser or serde implementation. Those remain pinned source and
+  adversarial-test obligations. Test USD v2 makes this a fresh-deployment
+  invariant; historical v1 wallet state is archived rather than normalized.
 
 ### T1 — Inflation soundness (`inflation_soundness`, `mints_signed`, `mints_authorized`)
 
@@ -125,7 +147,7 @@ OpenCsv/Lineage.lean    # unfolded PCD tree, exact edges, distinct inputs, versi
   `legacy_redeem_lineage_impossible` exclude unsafe legacy recursive nodes.
   `v4_one_input_lineage_valid_iff` connects the tree directly to the existing
   recipient-plus-change specialization.
-- **Rust correspondence.** CI pins exact `opencsv-rs@9b9eca2` and checks the
+- **Rust correspondence.** CI pins exact `opencsv-rs@1288977` and checks the
   AIR distinct-input selector/inversion constraint, production v4-root gate,
   mint-only v3 predecessor policy, and adversarial Rust receipts as well as the
   earlier one-input statement shape. This remains a source-drift gate, not a

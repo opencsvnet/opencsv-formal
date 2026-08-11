@@ -30,6 +30,11 @@
 'OpenCsv.Batch.versioned_commit_no_fallback' depends on axioms: [propext, OpenCsv.bindHash, OpenCsv.bindHash_injective]
 'OpenCsv.Batch.versioned_commit_unique' depends on axioms: [propext, Classical.choice, OpenCsv.bindHash, OpenCsv.bindHash_injective, Quot.sound]
 'OpenCsv.EdgesMatch.lengths' depends on axioms: [propext, OpenCsv.Sig, Quot.sound]
+'OpenCsv.Encoding.canonical_digest_injective' depends on axioms: [Quot.sound]
+'OpenCsv.Encoding.canonical_limb_unique' does not depend on any axioms
+'OpenCsv.Encoding.decode_limb_accepts_canonical' does not depend on any axioms
+'OpenCsv.Encoding.decode_limb_rejects_noncanonical' does not depend on any axioms
+'OpenCsv.Encoding.modular_reduction_has_noncanonical_twins' depends on axioms: [propext]
 'OpenCsv.Scan.anchor_bearing_is_candidate' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Scan.filter_absence_trustless' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Scan.filter_no_false_negatives' depends on axioms: [propext, Quot.sound]

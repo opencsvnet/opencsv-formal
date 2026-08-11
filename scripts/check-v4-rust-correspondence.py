@@ -57,6 +57,10 @@ def main() -> None:
     accept = (rust / "crates/opencsv-pcd/src/accept.rs").read_text()
     security = (rust / "crates/opencsv-pcd/src/security.rs").read_text()
     tests = (rust / "crates/opencsv-pcd/tests/node.rs").read_text()
+    digest = (rust / "crates/opencsv-core/src/digest.rs").read_text()
+    cli_ops = (rust / "crates/opencsv-cli/src/ops.rs").read_text()
+    ffi_wallet = (rust / "ffi/src/wallet.rs").read_text()
+    account = (rust / "ffi/src/account.rs").read_text()
 
     require(
         node,
@@ -193,6 +197,58 @@ def main() -> None:
         f"assert_eq!(COIN_PROOF_VERSION, {pin['proof_version']});",
         "Rust current-version receipt changed",
     )
+    require(
+        digest,
+        f"pub const BABY_BEAR_P: u32 = {pin['baby_bear_modulus_hex']};",
+        "BabyBear wire modulus changed",
+    )
+    require(
+        digest,
+        """
+        .all(|chunk| u32::from_le_bytes(chunk.try_into().expect("4-byte chunk")) < BABY_BEAR_P)
+        """,
+        "strict eight-limb canonical digest check changed",
+    )
+    require(
+        digest,
+        "non-canonical digest: a little-endian u32 limb is >= BabyBear p",
+        "non-canonical serde rejection changed",
+    )
+    require(
+        digest,
+        """
+        let candidate: u32 = rng.random();
+        if candidate < BABY_BEAR_P {
+            break candidate;
+        }
+        """,
+        "uniform rejection-sampled canonical randomness changed",
+    )
+    require(
+        cli_ops,
+        "Digest::random_canonical()",
+        "CLI canonical randomness delegation changed",
+    )
+    require(
+        ffi_wallet,
+        "Digest::random_canonical()",
+        "FFI canonical randomness delegation changed",
+    )
+    require(
+        account,
+        f"const SCHEMA_VERSION: u32 = {pin['account_config_generation']};",
+        "Test USD account generation changed",
+    )
+    require(
+        account,
+        f"const CHECKPOINT_VERSION: u32 = {pin['checkpoint_version']};",
+        "Test USD checkpoint generation changed",
+    )
+    require(
+        account,
+        f'pub const TEST_USD_V2_DEPLOYMENT_ID: &str = "{pin["deployment_id"]}";',
+        "Test USD deployment id changed",
+    )
 
     receipt = {
         "status": "verified",
@@ -207,6 +263,11 @@ def main() -> None:
         "production_root_version": pin["proof_version"],
         "conservation": "input + zero = recipient + change",
         "vk_tag": pin["vk_tag"],
+        "baby_bear_modulus": pin["baby_bear_modulus"],
+        "canonical_digest_limbs": 8,
+        "account_config_generation": pin["account_config_generation"],
+        "checkpoint_version": pin["checkpoint_version"],
+        "deployment_id": pin["deployment_id"],
         "scope": "source correspondence; Lean proves protocol semantics, not Rust/AIR equivalence",
     }
     print(json.dumps(receipt, sort_keys=True))
