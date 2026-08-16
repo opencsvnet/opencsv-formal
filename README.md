@@ -24,9 +24,10 @@ end of `OpenCsv/Theorems.lean` printing the exact assumptions of each headline
 theorem. The development contains **no `sorry` and no `admit`** (grep it);
 every cryptographic hardness assumption is an explicitly labeled `axiom` in
 `OpenCsv/Interfaces.lean` or the `sound` field of the `ProofSystem` structure.
-The current baseline audits **77 named declarations**: the previous 72
+The current baseline audits **78 named declarations**: the previous 72
 state/value/scan/batching/forwarding/lineage results plus five strict
-BabyBear-encoding declarations. The count is generated from
+BabyBear-encoding declarations and the executable-model soundness bridge. The
+count is generated from
 `axiom-audit.txt`; if a later edit changes it, the audit and this text must be
 reviewed together.
 
@@ -36,6 +37,8 @@ reviewed together.
 OpenCsv.lean            # root: imports the modules
 OpenCsv/Interfaces.lean # §6 item 1 — abstract crypto interfaces + ALL assumptions
 OpenCsv/State.lean      # §6 item 2 — coin state machine (valid traces)
+OpenCsv/Exec.lean       # §6 item 2 — executable checks + ValidTrace soundness bridge
+OpenCsv/Corpus.lean     # seeded model traces/mutations + dependency-free JSON writer
 OpenCsv/Theorems.lean   # §6 item 3 — theorems T1–T4 + corollaries
 OpenCsv/Value.lean      # the u64 limb/carry conservation gadget (value.rs)
 OpenCsv/Encoding.lean   # strict canonical BabyBear digest encoding
@@ -44,6 +47,27 @@ OpenCsv/Batch.lean      # envelope occurrence + co-funded batching v2 model
 OpenCsv/Forward.lean    # v4 one-input/two-output forwarding specialization
 OpenCsv/Lineage.lean    # unfolded PCD tree, exact edges, distinct inputs, version policy
 ```
+
+## Issue mapping
+
+- **opencsv-formal #1, item 2 — differential testing, model ↔ code.**
+  `OpenCsv.Exec.run` checks mint, transfer, and redeem traces left-to-right and
+  returns a typed first error. `run_sound` proves that every accepted
+  executable trace, under an explicit `Refines` implementation of the opaque
+  crypto interfaces, maps to the existing relational `ValidTrace`.
+  `lake exe gen-model-corpus [path]` deterministically emits 192 cases (32
+  each of valid, unbalanced value, wrong owner, reused nullifier, bad anchor,
+  and missing anchor). The checked-in Rust harness at
+  `crates/opencsv-core/tests/model_differential.rs` parses that corpus and
+  exercises the real `accept()` driver on `MockAnchorChain`.
+- **Completeness boundary.** A generic relational-to-executable theorem is
+  intentionally not claimed: `Sig` and the cryptographic functions in
+  `Interfaces.lean` are opaque, and an arbitrary `Refines.embedSig` need not
+  be surjective, so a relational trace's abstract signature need not have an
+  executable representation. The soundness direction required for generated
+  differential tests does not need that unjustified assumption. Bad/missing
+  anchor mutations target receiver acceptance, which is outside local
+  `StepValid`; the corpus records those as explicit chain-view mutations.
 
 ## What the theorems say, and what they correspond to
 
