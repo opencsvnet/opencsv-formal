@@ -35,6 +35,7 @@
 'OpenCsv.Encoding.decode_limb_accepts_canonical' does not depend on any axioms
 'OpenCsv.Encoding.decode_limb_rejects_noncanonical' does not depend on any axioms
 'OpenCsv.Encoding.modular_reduction_has_noncanonical_twins' depends on axioms: [propext]
+'OpenCsv.Exec.run_sound' depends on axioms: [propext, OpenCsv.Sig, OpenCsv.SigVerify, OpenCsv.assetId, OpenCsv.commitHash, OpenCsv.nullHash, OpenCsv.ownerKey, Quot.sound]
 'OpenCsv.Scan.anchor_bearing_is_candidate' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Scan.filter_absence_trustless' depends on axioms: [propext, Quot.sound]
 'OpenCsv.Scan.filter_no_false_negatives' depends on axioms: [propext, Quot.sound]
